@@ -1,0 +1,7 @@
+{
+  "name": "paginate",
+  "source": "examples/paginate-app",
+  "issue": "paginate() returns the wrong slice: page 2 of [1..7] with per_page=3 returns [7] instead of [4, 5, 6].",
+  "repro_targets": ["test_paginate.py::test_second_page_returns_items_4_to_6"],
+  "oracle_dir": "evals/cases/paginate/oracle"
+}

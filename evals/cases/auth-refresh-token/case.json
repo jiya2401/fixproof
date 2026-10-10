@@ -1,0 +1,7 @@
+{
+  "name": "auth-refresh-token",
+  "source": "examples/buggy-python-app",
+  "issue": "validate_refresh_token() accepts access tokens and rejects refresh tokens. Only 'refresh:<value>' tokens must be accepted; everything else must be rejected.",
+  "repro_targets": ["test_auth.py"],
+  "oracle_dir": "evals/cases/auth-refresh-token/oracle"
+}
