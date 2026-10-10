@@ -1,3 +1,5 @@
+> **Target architecture, not current status.** Property-based testing, mutation testing and Nebius-hosted execution below are planned. See the status table in README.md and docs/audit.md for what is implemented.
+
 # FixProof Architecture
 
 ## Design principle

@@ -1,52 +1,62 @@
-# Verification Policy
+# Verification Policy v1.0
 
-FixProof must never treat an LLM statement such as "the patch looks correct" as proof.
+Implemented in `backend/app/verification/verdict.py` and tested in
+`backend/tests/test_verdict.py`. An LLM statement is never evidence. A verdict is computed
+only from executed checks.
 
-## Minimum acceptance evidence
+## Check outcomes
 
-A candidate repair should not be marked `VERIFIED` unless all required checks for the run have produced concrete evidence.
+| Outcome | Meaning |
+|---|---|
+| `passed` | Executed; no counterexample found (bug-reproduction: the failure *was* reproduced) |
+| `failed` | Executed; a concrete failing test / counterexample exists |
+| `error` | Tried to run but produced no trustworthy result (collection error, timeout, no tests, planner failure) |
+| `skipped` / `not_run` | Not executed |
 
-For the initial Python/pytest scope:
+A check that "passes" while executing **zero** tests is treated as `not_run`.
+Tests skipped inside pytest are not counted as executed.
+A **counterexample** (`failed`) is distinct from an **execution failure** (`error`).
 
-1. The original failure must be reproducible before the patch when a deterministic reproduction is available.
-2. The same reproduction must pass after the patch.
-3. Relevant existing regression tests must pass.
-4. Generated verification scenarios that are executable must pass.
-5. No blocking static-analysis failure may remain.
-6. The verification engine must preserve command output and exit status.
+## Mandatory checks
 
-## Conditional verdicts
+`reproduction_red` (precondition) · `patch_applies_in_scope` · `reproduction_green` ·
+`regression` · `adversarial`.
 
-Use `VERIFIED_WITH_CONDITIONS` when core behavior is fixed but some requested evidence could not be fully established, for example:
-- mutation score below the configured target
-- unsupported dependency path
-- non-deterministic reproduction
-- verification budget exhausted
+- `reproduction_red`: the original reproduction must fail before patching.
+- `patch_applies_in_scope`: diff parses, applies with `git apply`, stays inside the repo, and
+  does **not** modify tests/conftest/test config (otherwise a model could "fix" a bug by editing the test).
+- `reproduction_green`: the same reproduction passes after patching.
+- `regression`: the repository's full pytest suite passes after patching.
+- `adversarial`: model-authored pytest tests, executed in the sandbox, find no counterexample.
 
-Use `INSUFFICIENT_EVIDENCE` when the system cannot establish a trustworthy reproduction or cannot execute the relevant verification environment.
+All mandatory checks are re-run on a fresh workspace after **every** patch.
 
-Use `NOT_VERIFIED` when a concrete counterexample, failed regression, failed original reproduction, or other blocking check remains.
+## Verdicts (evaluated in this order)
 
-## Security
+1. **NOT_VERIFIED** — a required correctness check `failed` (counterexample, failed regression,
+   reproduction still failing, patch touching tests or not applying).
+2. **INSUFFICIENT_EVIDENCE** — a mandatory check is missing/`error`/`skipped`/`not_run`; the bug was
+   never reproduced (`reproduction_red` not passed); or a check passed with zero executed tests.
+3. **VERIFIED_WITH_CONDITIONS** — all mandatory checks passed, but: the sandbox is not self-tested
+   container isolation, an optional check did not pass, or limitations were recorded.
+4. **VERIFIED** — none of the above.
 
-Target repository code is untrusted.
+`VERIFIED` is not a proof. It means: *no counterexample was found within the executed checks and
+budget.* The certificate lists exactly what ran and what did not.
 
-Production sandbox requirements:
-- non-root execution
-- CPU/memory/PID/time limits
-- no host Docker socket
-- no host filesystem mounts except an isolated workspace
-- no Nebius API key inside the target environment
-- no GitHub credentials inside the target environment
-- network disabled during verification unless a narrowly scoped setup step explicitly requires it
-- sandbox destroyed after the run
+## Known weaknesses of this policy (read before trusting a verdict)
 
-## Wording
+- Adversarial tests are model-written. A failing one may be a wrong test (false rejection); a passing
+  one may be weak (false acceptance). Until mutation testing / test-validity gates exist, treat
+  counterexamples as candidates for human review.
+- Hypotheses are not experimentally discriminated (recorded as `proposed_untested`).
+- Local-process sandbox mode caps every verdict at `VERIFIED_WITH_CONDITIONS` by design.
 
-FixProof should report:
+## Sandbox requirements
 
-> No counterexample was found within the configured verification strategy and execution budget.
-
-It should not report:
-
-> This patch is universally correct.
+- `LocalSandbox` (dev only, tested): scrubbed env (no keys/credentials), rlimits, timeout + process-group
+  kill, workspace copy, empty network namespace when the kernel permits. **No filesystem isolation.**
+- `DockerSandbox` (implemented, **not yet run in a real Docker environment**): `--network none`,
+  read-only root, non-root, `--cap-drop ALL`, pids/memory/cpu limits. `self_test()` must pass on the host
+  before the policy treats isolation as verified.
+- Nebius-hosted sandbox: **not implemented**.

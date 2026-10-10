@@ -7,7 +7,7 @@ FixProof is an evidence-driven autonomous software repair system being built for
 The project is intentionally not another code generator. FixProof separates **AI reasoning** from **verification evidence**:
 
 - NVIDIA Nemotron reasons about the repository, root cause, minimal repair, and verification strategy.
-- A deterministic execution engine runs reproduction tests, existing regression tests, generated adversarial tests, property-based tests, mutation tests, and impact-aware checks.
+- A deterministic execution engine runs the reproduction test, the existing regression suite, and model-authored adversarial tests (property-based and mutation testing are planned, not implemented).
 - A patch receives a Fix Certificate only when the collected executable evidence satisfies the verification policy.
 
 ## Core workflow
@@ -35,11 +35,52 @@ FAIL ──→ Repair iteration
 
 > AI should not be trusted to declare its own code correct. A patch should earn verification through executable evidence.
 
-## Current status
+## Honest status
 
-This repository is the **core project scaffold**. It contains a runnable backend and frontend, the agreed architecture, typed investigation state, Nebius/Nemotron client wrapper, agent interfaces, verification primitives, Python code-graph analysis, sandbox abstractions, tests, and a deliberately buggy example project.
+Legend: ✅ implemented and tested · 🟡 implemented, not yet exercised live · ⛔ not implemented
 
-The autonomous repair loop is intentionally built milestone-by-milestone rather than faked in the starter repository.
+| Capability | Status |
+|---|---|
+| Reproduce original failure (pytest exit code + JUnit parsed; "bug not reproduced" ⇒ stop) | ✅ |
+| Patch scope validation (rejects edits to tests/config, traversal) + `git apply` | ✅ |
+| Re-run reproduction **and** full regression suite after every patch | ✅ |
+| Model-authored adversarial pytest tests **executed** in the sandbox | ✅ (with scripted model) / 🟡 (live Nemotron) |
+| Counterexample → fixer feedback, bounded retries, repeated-patch detection | ✅ |
+| Verdict policy v1, sealed tamper-evident Fix Certificate, certificate UI | ✅ |
+| Process sandbox: scrubbed env, rlimits, timeout, network namespace | ✅ tested; **no filesystem isolation** |
+| Docker sandbox (`--network none`, read-only, non-root, cap-drop) | 🟡 code + argv test only; never run against a Docker daemon |
+| Nebius/Nemotron client (retries, JSON validation, usage tracking) | 🟡 `python scripts/check_nebius.py` verifies it with a key |
+| Benchmark harness, 2 validated cases, held-out oracles | ✅ harness / ⛔ **no model results yet** |
+| Hypothesis *experiments* (hypotheses are recorded as untested) | ⛔ |
+| Hypothesis property tests, mutation testing, impact-selected tests | ⛔ (code-graph primitive exists, unused by the pipeline) |
+| Nebius Token Factory Sandboxes / Serverless Jobs | ⛔ |
+| Arbitrary repository cloning (only bundled `examples/` cases run) | ⛔ |
+
+In local-process sandbox mode every verdict is capped at `VERIFIED_WITH_CONDITIONS`.
+No benchmark numbers are published here because none have been measured.
+
+## What the model does vs. what tools do
+
+| Step | Who |
+|---|---|
+| Root-cause hypotheses, patch, adversarial test authoring | NVIDIA Nemotron via Nebius Token Factory |
+| Snapshot hash, reproduction, patch apply, regression, executing adversarial tests, verdict | deterministic code |
+
+The certificate records this attribution plus live model usage (calls, tokens).
+
+## Try it
+
+```bash
+cd backend && pip install -r requirements.txt -r requirements-dev.txt && pytest      # no key needed
+cp .env.example .env   # add NEBIUS_API_KEY, then:
+python scripts/check_nebius.py                       # verifies endpoint + model id
+FIXPROOF_SANDBOX_MODE=local FIXPROOF_ALLOW_UNSAFE_LOCAL_EXECUTION=true \
+  uvicorn app.main:app --port 8000                    # dev only; or build backend/sandbox-image and use docker
+cd ../frontend && npm ci && npm run dev               # pick a bundled case, run, read the certificate
+python evals/benchmark.py --trials 3                  # baseline vs FixProof (needs key)
+```
+
+See `docs/audit.md`, `docs/verification-policy.md`, `docs/roadmap.md`.
 
 ## Tech stack
 
@@ -185,41 +226,15 @@ pytest -q
 
 ## Nebius / Nemotron configuration
 
-The starter wrapper reads these environment variables:
+The client reads these environment variables (confirm the model id with `scripts/check_nebius.py`):
 
 ```env
 NEBIUS_API_KEY=
 NEBIUS_BASE_URL=https://api.tokenfactory.nebius.com/v1
-NEBIUS_MODEL=nvidia/Nemotron-3_5-Lightning
+NEBIUS_MODEL=nvidia/nemotron-3-super-120b-a12b
 ```
 
 The exact production model can be changed later without changing the agent architecture.
-
-## Initial API
-
-- `GET /health` — backend health check
-- `GET /api/v1/about` — project capability summary
-- `POST /api/v1/investigations` — create an investigation record
-- `GET /api/v1/investigations/{id}` — read its current state
-
-The create endpoint **does not pretend to repair code yet**. It creates a typed investigation state that the upcoming milestones will drive through the real repair pipeline.
-
-## Development milestones
-
-1. **M1 — Red/green repair loop:** reproduce a failing test, ask Nemotron for a minimal repair, apply patch, rerun the same reproduction.
-2. **M2 — Regression suite:** run existing tests before accepting a repair.
-3. **M3 — Verification planner:** Nemotron outputs structured edge cases, invariants, and attack scenarios.
-4. **M4 — Generated adversarial tests:** execution engine runs model-designed tests.
-5. **M5 — Repair iteration:** failed evidence automatically returns to the fixer.
-6. **M6 — Property-based testing:** add Hypothesis-generated counterexamples.
-7. **M7 — Impact graph:** use AST + NetworkX to identify affected modules/tests.
-8. **M8 — Mutation testing:** measure whether verification tests can detect deliberately broken variants.
-9. **M9 — Fix Certificate:** evidence-backed `VERIFIED / VERIFIED WITH CONDITIONS / NOT VERIFIED / INSUFFICIENT EVIDENCE` verdicts.
-10. **M10 — Product dashboard:** live investigation + evidence + certificate UI.
-11. **M11 — Benchmark:** compare baseline Nemotron repair vs FixProof verification loop.
-12. **M12 — Nebius deployment and demo polish.**
-
-See [`docs/roadmap.md`](docs/roadmap.md) for acceptance criteria.
 
 ## Safety model
 

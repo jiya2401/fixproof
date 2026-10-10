@@ -39,3 +39,10 @@ logs/
 # Mutation / coverage artifacts
 .mutmut-cache
 .mutmut-cache/*
+
+# frontend build outputs
+frontend/dist/
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+evals/results/

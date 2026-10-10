@@ -1,139 +1,35 @@
-# FixProof Build Roadmap
+# FixProof Roadmap (reordered; status is what is actually in the code)
 
-The purpose of this roadmap is to keep implementation aligned with the hackathon thesis and prevent feature drift.
+Deadline: Oct 30, 2026 10:00 PDT (submission period per the hackathon listing).
 
-## M0 — Core repository scaffold (included in this starter)
+## Done in the current slice (tested)
+- Verdict policy v1 + sealed, typed Fix Certificate (backend + frontend types)
+- Process sandbox (env scrubbing, rlimits, timeout, network namespace) with isolation tests
+- Patch scope validation (no test edits) + `git apply`
+- Red → patch → green → regression → adversarial pipeline, bounded repair loop with counterexample
+  feedback, repeated-patch detection
+- Validated Nebius client (timeouts/retries, JSON validation, usage tracking) — **live call unverified**
+- Benchmark harness + 2 validated cases + held-out oracles — **no model results yet**
+- Certificate UI with expandable evidence, iterations, timeline
 
-Acceptance criteria:
-- backend starts
-- frontend starts
-- health endpoint works
-- typed investigation state exists
-- Nebius client wrapper exists
-- sandbox interface exists
-- verification result/verdict primitives exist
-- Python code graph parser works on a simple project
-- backend tests pass
+## P0 — must happen before submission
+1. Run `python scripts/check_nebius.py` with a real key; fix `NEBIUS_MODEL` to the exact listed id.
+2. Run the pipeline end-to-end with real Nemotron on both example cases; fix prompt/format failures.
+3. Establish the real sandbox: build `backend/sandbox-image`, run `DockerSandbox.self_test()`.
+   Also investigate the **Token Factory Sandboxes** named in the track description and implement
+   `NebiusSandbox` behind the existing `SandboxRunner` interface (API not verified here).
+4. Run `evals/benchmark.py` (≥3 trials/case) and publish whatever it measures, wins or not.
+5. Add LICENSE file (README references MIT; none present). Record the ≤3 min demo.
 
-## M1 — Red/green repair loop
+## P1 — raises credibility
+- Test-validity gate for model-written tests (reduce false rejections): e.g. require the
+  repro-derived test semantics to hold, run adversarial tests on the original code to record which
+  ones discriminate, and surface "needs human review" instead of a hard fail when a test cannot be
+  validated.
+- Hypothesis experiments: run model-authored probes to support/contradict hypotheses.
+- Hypothesis property tests (only for invariants expressible as templates).
+- More benchmark cases (≥6), including cases where FixProof is expected to *lose*.
 
-Goal: prove the technical heart before adding polish.
-
-Acceptance criteria:
-- copy/clone one small Python target into an isolated workspace
-- execute an explicitly selected failing pytest reproduction
-- preserve failing evidence
-- send repository context + issue to Nemotron
-- produce a candidate patch
-- apply patch to workspace
-- execute the exact same reproduction
-- preserve passing/failing evidence
-- no UI dependency
-
-## M2 — Existing regression suite
-
-Acceptance criteria:
-- discover relevant pytest suite
-- execute after patch
-- reject patch on regression
-- persist stdout/stderr/exit codes
-
-## M3 — Structured verification planner
-
-Nemotron must return typed JSON containing:
-- adversarial scenarios
-- invariants/properties
-- targeted files/functions
-- recommended test commands
-- risk areas
-
-No free-form verifier verdict is accepted.
-
-## M4 — Adversarial generated tests
-
-Acceptance criteria:
-- planner-generated tests are written into an isolated temporary test location
-- tests execute rather than being judged by text
-- failed adversarial tests feed evidence back to repair loop
-
-## M5 — Repair iteration
-
-Acceptance criteria:
-- failed evidence creates next repair attempt
-- maximum iteration budget enforced
-- every patch version is preserved
-
-## M6 — Property-based testing
-
-Acceptance criteria:
-- convert suitable invariants into Hypothesis strategies/tests
-- record number of generated examples and counterexamples
-
-## M7 — Dependency impact graph
-
-Acceptance criteria:
-- Python AST builds import/function-call graph
-- changed symbols map to likely dependent modules
-- impacted test modules are prioritized
-
-## M8 — Mutation testing
-
-Acceptance criteria:
-- mutmut runs only on scoped changed code where practical
-- mutation score and surviving mutants recorded
-- surviving high-risk mutant can downgrade verdict
-
-## M9 — Fix Certificate
-
-Certificate contains:
-- issue
-- reproduction before/after
-- root-cause hypothesis/evidence summary
-- patch summary
-- regression results
-- adversarial test results
-- property-test results
-- mutation results
-- impact graph summary
-- limitations
-- evidence-based verdict
-
-## M10 — Product dashboard
-
-UI priorities:
-- one-page investigation creation
-- live pipeline status
-- hypothesis/evidence ledger
-- patch diff
-- verification evidence
-- Fix Certificate
-
-Do not build an IDE clone.
-
-## M11 — Evaluation
-
-Compare:
-
-```text
-Baseline: Nemotron → patch → existing tests
-FixProof: Nemotron → patch → adversarial strategy → evidence engine → repair loop
-```
-
-Track:
-- true fixes accepted
-- incorrect fixes accepted
-- regressions introduced
-- counterexamples discovered
-- repair iterations
-- execution time
-- model/token usage
-
-## M12 — Nebius deployment and demo
-
-Acceptance criteria:
-- real Nemotron calls through Nebius Token Factory
-- isolated execution path demonstrated
-- public working demo/test build
-- public repository + MIT license
-- README accurately identifies sponsor technologies
-- <=3-minute public demo video
+## P2 — conditional
+- mutmut on changed code (measures test strength), deeper call graph / impact-selected tests,
+  arbitrary repository cloning, Nebius Serverless Jobs, multi-language.
