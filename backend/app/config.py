@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     database_url: str = Field(default="sqlite:///./fixproof.db", alias="FIXPROOF_DATABASE_URL")
     max_repair_iterations: int = Field(default=3, alias="FIXPROOF_MAX_REPAIR_ITERATIONS")
     sandbox_mode: str = Field(default="docker", alias="FIXPROOF_SANDBOX_MODE")
+    sandbox_image: str = Field(default="fixproof-sandbox:latest", alias="FIXPROOF_SANDBOX_IMAGE")
     cors_origins: str = Field(default="http://localhost:5173", alias="FIXPROOF_CORS_ORIGINS")
     allow_unsafe_local_execution: bool = Field(
         default=False, alias="FIXPROOF_ALLOW_UNSAFE_LOCAL_EXECUTION"
@@ -24,9 +25,10 @@ class Settings(BaseSettings):
     nebius_base_url: str = Field(
         default="https://api.tokenfactory.nebius.com/v1", alias="NEBIUS_BASE_URL"
     )
-    nebius_model: str = Field(
-        default="nvidia/Nemotron-3_5-Lightning", alias="NEBIUS_MODEL"
-    )
+    # Unverified default: take the exact id from `python scripts/check_nebius.py`.
+    nebius_model: str = Field(default="nvidia/nemotron-3-super-120b-a12b", alias="NEBIUS_MODEL")
+    llm_timeout_seconds: float = Field(default=120.0, alias="FIXPROOF_LLM_TIMEOUT_SECONDS")
+    llm_max_retries: int = Field(default=2, alias="FIXPROOF_LLM_MAX_RETRIES")
 
     @property
     def cors_origin_list(self) -> list[str]:

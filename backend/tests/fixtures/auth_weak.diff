@@ -1,0 +1,8 @@
+--- a/auth.py
++++ b/auth.py
+@@ -6,4 +6,4 @@
+     token_type, _, value = token.partition(":")
+     if not value:
+         return False
+-    return token_type == "access"
++    return token_type != "access"

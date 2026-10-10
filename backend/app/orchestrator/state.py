@@ -1,8 +1,11 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
+
+from app.certificate import FixCertificate
+from app.verification.results import VerificationVerdict
 
 
 class InvestigationStage(StrEnum):
@@ -15,13 +18,6 @@ class InvestigationStage(StrEnum):
     REPAIRING = "repairing"
     COMPLETED = "completed"
     FAILED = "failed"
-
-
-class VerificationVerdict(StrEnum):
-    VERIFIED = "verified"
-    VERIFIED_WITH_CONDITIONS = "verified_with_conditions"
-    NOT_VERIFIED = "not_verified"
-    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
 
 
 class Hypothesis(BaseModel):
@@ -46,8 +42,8 @@ class InvestigationState(BaseModel):
     repo_url: str
     issue: str
     stage: InvestigationStage = InvestigationStage.CREATED
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     relevant_files: list[str] = Field(default_factory=list)
     hypotheses: list[Hypothesis] = Field(default_factory=list)
@@ -57,3 +53,7 @@ class InvestigationState(BaseModel):
     repair_iteration: int = 0
     verdict: VerificationVerdict | None = None
     limitations: list[str] = Field(default_factory=list)
+    example_case: str | None = None
+    repro_targets: list[str] = Field(default_factory=list)
+    certificate: FixCertificate | None = None
+    error: str | None = None

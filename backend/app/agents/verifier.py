@@ -1,12 +1,15 @@
 from app.agents.models import VerificationPlan
 from app.llm.nebius import NebiusClient
 
-
-SYSTEM_PROMPT = """You are FixProof's adversarial verification planner.
-Assume the proposed patch may be insufficient. Design the cheapest high-value experiments
-most likely to falsify it. You design verification; you do not issue the final verdict.
-Do not inherit or repeat the repair agent's confidence.
-"""
+SYSTEM_PROMPT = """You are FixProof's adversarial test designer.
+Assume the candidate patch is insufficient. Write executable pytest tests that would expose
+the most likely remaining defects: boundary values, malformed input, inputs the patch's
+condition mishandles, and violations of the documented contract (read the docstrings).
+Tests must be deterministic, import the code under test directly, avoid network/filesystem
+side effects, and must not use pytest.skip or xfail. You do not decide whether the patch is
+correct; the tests will be run by deterministic tooling and the results decide.
+Return JSON: {"tests": [{"name": str, "rationale": str, "code": str}],
+"invariants": [str], "risk_areas": [str]} where code is a complete pytest module."""
 
 
 class VerificationPlannerAgent:
@@ -19,16 +22,16 @@ class VerificationPlannerAgent:
         issue: str,
         patch_diff: str,
         reproduction_evidence: str,
-        impact_context: str,
+        relevant_code: str,
+        prior_counterexamples: list[str] | None = None,
     ) -> VerificationPlan:
-        data = self.client.complete_json(
-            system=SYSTEM_PROMPT,
-            user=(
-                f"Original issue:\n{issue}\n\nCandidate patch:\n{patch_diff}\n\n"
-                f"Original reproduction evidence:\n{reproduction_evidence}\n\n"
-                f"Impact context:\n{impact_context}\n\n"
-                "Return keys: adversarial_scenarios, invariants, regression_targets, "
-                "suggested_commands, risk_areas."
-            ),
+        prompt = (
+            f"Original issue:\n{issue}\n\nCandidate patch:\n{patch_diff}\n\n"
+            f"Original failing reproduction:\n{reproduction_evidence}\n\n"
+            f"Code after patch:\n{relevant_code}"
         )
-        return VerificationPlan.model_validate(data)
+        if prior_counterexamples:
+            prompt += "\n\nCounterexamples already found:\n" + "\n".join(prior_counterexamples)
+        return self.client.complete_model(
+            system=SYSTEM_PROMPT, user=prompt, schema=VerificationPlan
+        )

@@ -1,7 +1,6 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.orchestrator.state import InvestigationStage, InvestigationState
-
 
 _ALLOWED_TRANSITIONS: dict[InvestigationStage, set[InvestigationStage]] = {
     InvestigationStage.CREATED: {InvestigationStage.REPRODUCING, InvestigationStage.FAILED},
@@ -46,5 +45,5 @@ class WorkflowEngine:
         if next_stage not in _ALLOWED_TRANSITIONS[state.stage]:
             raise WorkflowError(f"Invalid transition: {state.stage} -> {next_stage}")
         state.stage = next_stage
-        state.updated_at = datetime.now(timezone.utc)
+        state.updated_at = datetime.now(UTC)
         return state

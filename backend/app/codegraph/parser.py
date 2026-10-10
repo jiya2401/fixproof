@@ -31,7 +31,9 @@ def build_python_code_graph(repo_path: Path) -> nx.DiGraph:
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 function = f"{module}:{node.name}"
-                graph.add_node(function, kind="function", path=str(file_path.relative_to(repo_path)))
+                graph.add_node(
+                    function, kind="function", path=str(file_path.relative_to(repo_path))
+                )
                 graph.add_edge(module, function, relation="defines")
 
                 for child in ast.walk(node):

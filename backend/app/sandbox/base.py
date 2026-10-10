@@ -2,6 +2,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.verification.results import SandboxInfo
+
 
 @dataclass(slots=True)
 class CommandResult:
@@ -10,10 +12,11 @@ class CommandResult:
     stdout: str
     stderr: str
     duration_seconds: float
+    timed_out: bool = False
 
     @property
     def passed(self) -> bool:
-        return self.exit_code == 0
+        return self.exit_code == 0 and not self.timed_out
 
 
 class SandboxRunner(ABC):
@@ -27,4 +30,9 @@ class SandboxRunner(ABC):
 
     @abstractmethod
     def destroy(self, workspace: Path) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def describe(self) -> SandboxInfo:
+        """Honest description of the isolation actually provided."""
         raise NotImplementedError
