@@ -1,4 +1,5 @@
 from app.agents.models import PatchProposal
+from app.agents.parsing import parse_patch_reply
 from app.llm.nebius import NebiusClient
 
 SYSTEM_PROMPT = """You are FixProof's repair agent.
@@ -9,7 +10,12 @@ b/pkg/mod.py). Never modify test files, conftest.py or test configuration; patch
 are rejected automatically. Do not claim the patch is correct: verification happens outside
 the language model. When given counterexamples from earlier attempts, fix the underlying
 cause rather than special-casing the failing inputs.
-Return JSON: {"summary": str, "rationale": str, "diff": str}"""
+Reply in exactly this format and nothing else:
+SUMMARY: <one line>
+RATIONALE: <one or two lines>
+```diff
+<unified diff>
+```"""
 
 
 class FixAgent:
@@ -25,4 +31,6 @@ class FixAgent:
         )
         if feedback:
             prompt += f"\n\nPrevious attempt was rejected by executed checks:\n{feedback}"
-        return self.client.complete_model(system=SYSTEM_PROMPT, user=prompt, schema=PatchProposal)
+        return self.client.complete_parsed(
+            system=SYSTEM_PROMPT, user=prompt, parser=parse_patch_reply
+        )

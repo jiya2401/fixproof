@@ -1,6 +1,7 @@
 import json
 import re
 import time
+from collections.abc import Callable
 from typing import Any, TypeVar
 
 from openai import OpenAI
@@ -9,6 +10,7 @@ from pydantic import BaseModel, ValidationError
 from app.config import get_settings
 
 T = TypeVar("T", bound=BaseModel)
+T2 = TypeVar("T2")
 
 
 class NebiusConfigurationError(RuntimeError):
@@ -91,6 +93,23 @@ class NebiusClient:
         if not content:
             raise ModelOutputError("Nemotron returned an empty response")
         return content
+
+    def complete_parsed(self, *, system: str, user: str, parser: Callable[[str], T2]) -> T2:
+        """Run `parser` over a plain-text reply; one corrective retry on ValueError."""
+        prompt = user
+        last_error: Exception | None = None
+        for _ in range(2):
+            raw = self.complete(system=system, user=prompt, temperature=0.0)
+            try:
+                return parser(raw)
+            except (ValueError, ValidationError) as exc:
+                last_error = exc
+                self.usage.retries_for_malformed_output += 1
+                prompt = (
+                    f"{user}\n\nYour previous reply could not be parsed: {str(exc)[:300]}\n"
+                    "Reply again using exactly the required format."
+                )
+        raise ModelOutputError(f"Nemotron reply failed parsing: {last_error}")
 
     def complete_model(self, *, system: str, user: str, schema: type[T]) -> T:
         """Return a validated `schema` instance; one corrective retry on malformed output."""
