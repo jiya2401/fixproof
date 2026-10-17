@@ -149,6 +149,7 @@ def test_unparseable_adversarial_test_is_not_a_pass(auth_src) -> None:
 def test_skipped_adversarial_test_is_not_a_pass(auth_src) -> None:
     skipper = AdversarialTest(
         name="skipper", rationale="x",
+        spec_quote="Return True only for refresh tokens",
         code="import pytest\n\ndef test_x():\n    pytest.skip('later')\n",
     )  # fmt: skip
     cert = run(auth_src, ScriptedFixer([fixture_text("auth_correct.diff")]),
@@ -188,3 +189,58 @@ def test_baseline_mode_stops_once_visible_checks_pass(auth_src) -> None:
     fixer = ScriptedFixer([fixture_text("auth_weak.diff"), fixture_text("auth_correct.diff")])
     cert = run(auth_src, fixer, None, ["test_auth.py"], max_iterations=3)
     assert len(cert.iterations) == 1 and len(fixer.calls) == 1
+
+
+# --- spec grounding of model-authored tests ---------------------------------------------------
+
+UNGROUNDED_WHITESPACE = AdversarialTest(
+    name="space_after_colon",
+    rationale="invented whitespace rule",
+    spec_quote="values must not start with a space",  # not in the issue or any docstring
+    code=(
+        "from auth import validate_refresh_token\n\n"
+        "def test_space_after_colon():\n"
+        "    assert validate_refresh_token('refresh: abc123') is False\n"
+    ),
+)
+
+
+def test_ungrounded_failing_test_is_a_condition_not_a_veto_and_not_fed_back(auth_src) -> None:
+    fixer = ScriptedFixer([fixture_text("auth_correct.diff")])
+    planner = ScriptedPlanner([AUTH_ADVERSARIAL, UNGROUNDED_WHITESPACE])
+    cert = run(auth_src, fixer, planner, ["test_auth.py"], max_iterations=3)
+
+    grounded = check(cert, "adversarial", 0)
+    ungrounded = check(cert, "adversarial_ungrounded", 0)
+    assert grounded.outcome == CheckOutcome.PASSED and grounded.tests_executed == 1
+    assert ungrounded.outcome == CheckOutcome.FAILED and not ungrounded.required
+    assert len(cert.iterations) == 1 and fixer.calls == [None]  # nothing fed back
+    assert cert.verdict == VerificationVerdict.VERIFIED_WITH_CONDITIONS
+    assert any("adversarial_ungrounded" in r for r in cert.verdict_reasons)
+
+
+def test_grounded_failing_test_still_vetoes_and_shows_its_spec_quote(auth_src) -> None:
+    cert = run(
+        auth_src,
+        ScriptedFixer([fixture_text("auth_weak.diff")]),
+        ScriptedPlanner([AUTH_ADVERSARIAL, UNGROUNDED_WHITESPACE]),
+        ["test_auth.py"],
+        max_iterations=1,
+    )
+    adv = check(cert, "adversarial", 0)
+    assert adv.outcome == CheckOutcome.FAILED
+    assert any('[SPEC: "Return True only for refresh tokens"]' in c for c in adv.counterexamples)
+    assert cert.verdict == VerificationVerdict.NOT_VERIFIED
+
+
+def test_only_ungrounded_tests_means_insufficient_evidence(auth_src) -> None:
+    cert = run(
+        auth_src,
+        ScriptedFixer([fixture_text("auth_correct.diff")]),
+        ScriptedPlanner([UNGROUNDED_WHITESPACE]),
+        ["test_auth.py"],
+        max_iterations=1,
+    )
+    adv = check(cert, "adversarial")
+    assert adv.outcome == CheckOutcome.ERROR and "no spec-grounded" in adv.summary
+    assert cert.verdict == VerificationVerdict.INSUFFICIENT_EVIDENCE

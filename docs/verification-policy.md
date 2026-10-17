@@ -27,9 +27,18 @@ A **counterexample** (`failed`) is distinct from an **execution failure** (`erro
   does **not** modify tests/conftest/test config (otherwise a model could "fix" a bug by editing the test).
 - `reproduction_green`: the same reproduction passes after patching.
 - `regression`: the repository's full pytest suite passes after patching.
-- `adversarial`: model-authored pytest tests, executed in the sandbox, find no counterexample.
+- `adversarial`: model-authored **spec-grounded** pytest tests, executed in the sandbox, find no counterexample. At least one grounded test must have executed.
+- `adversarial_ungrounded` (optional): tests whose spec quote was missing or not found. Their failures are reported as a condition for human review, never as a veto, and are never fed back to the fixer.
 
 All mandatory checks are re-run on a fresh workspace after **every** patch.
+
+## Spec grounding of model-written tests
+
+Each adversarial test must quote, verbatim, a sentence from the issue or from the ORIGINAL
+(pre-patch) source docstrings that it enforces (whitespace/case-insensitive, min 15 chars;
+test files are not a source of spec). The check is mechanical (`verification/grounding.py`).
+Counterexamples are printed with their `[SPEC: "..."]` quote for review. Grounding proves
+traceability, not that the assertion truly follows from the quote.
 
 ## Verdicts (evaluated in this order)
 
@@ -46,9 +55,10 @@ budget.* The certificate lists exactly what ran and what did not.
 
 ## Known weaknesses of this policy (read before trusting a verdict)
 
-- Adversarial tests are model-written. A failing one may be a wrong test (false rejection); a passing
-  one may be weak (false acceptance). Until mutation testing / test-validity gates exist, treat
-  counterexamples as candidates for human review.
+- Adversarial tests are model-written. Grounding reduces invented-rule rejections (observed once in a
+  live run: a test required rejecting `"refresh: abc123"`, which no stated rule covers), but a grounded
+  test can still over-interpret its quote, and a passing one may be weak. Treat counterexamples as
+  candidates for human review; mutation testing is not implemented.
 - Hypotheses are not experimentally discriminated (recorded as `proposed_untested`).
 - Local-process sandbox mode caps every verdict at `VERIFIED_WITH_CONDITIONS` by design.
 

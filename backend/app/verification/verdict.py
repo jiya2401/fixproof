@@ -99,7 +99,9 @@ def evaluate_policy(report: VerificationReport) -> PolicyDecision:
     for check in report.checks:
         if not check.required and check.name not in MANDATORY_CHECKS:
             if _effective_outcome(check) != CheckOutcome.PASSED:
-                conditions.append(f"optional check '{check.name}' is {check.outcome.value}")
+                conditions.append(
+                    f"optional check '{check.name}' is {check.outcome.value}: {check.summary}"
+                )
     conditions.extend(report.limitations)
     if conditions:
         return PolicyDecision(

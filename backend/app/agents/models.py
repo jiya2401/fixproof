@@ -24,6 +24,9 @@ class AdversarialTest(BaseModel):
     name: str  # short identifier; used for the generated file name
     rationale: str  # what behavior this test attacks
     code: str  # complete pytest module source
+    spec_quote: str = ""  # verbatim sentence from the issue/docstrings this test enforces
+    grounded: bool = False  # set by the pipeline, never by the model
+    grounding_note: str = ""
 
 
 class VerificationPlan(BaseModel):

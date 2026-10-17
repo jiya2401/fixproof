@@ -23,7 +23,8 @@ def test_patch_reply_without_diff_block_rejected() -> None:
 
 def test_verification_reply_parses_multiple_tests() -> None:
     raw = (
-        "### TEST empty_value\nRATIONALE: empty value\n```python\n"
+        "### TEST empty_value\nRATIONALE: empty value\n"
+        "SPEC: Return True only for refresh tokens\n```python\n"
         "from auth import validate_refresh_token\n\ndef test_a():\n"
         '    assert not validate_refresh_token("refresh:")\n```\n'
         "### TEST other_type\n```python\ndef test_b():\n    assert True\n```\n"
@@ -32,6 +33,8 @@ def test_verification_reply_parses_multiple_tests() -> None:
     plan = parse_verification_reply(raw)
     assert [t.name for t in plan.tests] == ["empty_value", "other_type"]
     assert '"refresh:"' in plan.tests[0].code
+    assert plan.tests[0].spec_quote == "Return True only for refresh tokens"
+    assert plan.tests[1].spec_quote == ""
     assert plan.invariants == ["only refresh accepted"] and plan.risk_areas == ["prefix handling"]
 
 

@@ -10,7 +10,8 @@ from app.agents.models import AdversarialTest, PatchProposal, VerificationPlan
 
 _DIFF_BLOCK = re.compile(r"```(?:diff|patch)?[ \t]*\n(.*?)\n```", re.DOTALL)
 _TEST_BLOCK = re.compile(
-    r"^###[ \t]*TEST[ \t]+([A-Za-z0-9_\-]+)[^\n]*\n(?:RATIONALE:[ \t]*(.*?)\n)?"
+    r"^###[ \t]*TEST[ \t]+([A-Za-z0-9_\-]+)[^\n]*\n(?:RATIONALE:[ \t]*([^\n]*)\n)?"
+    r"(?:SPEC:[ \t]*([^\n]*)\n)?"
     r"```(?:python)?[ \t]*\n(.*?)\n```",
     re.MULTILINE | re.DOTALL,
 )
@@ -39,7 +40,10 @@ def parse_patch_reply(raw: str) -> PatchProposal:
 def parse_verification_reply(raw: str) -> VerificationPlan:
     tests = [
         AdversarialTest(
-            name=m.group(1), rationale=(m.group(2) or "").strip(), code=m.group(3) + "\n"
+            name=m.group(1),
+            rationale=(m.group(2) or "").strip(),
+            spec_quote=(m.group(3) or "").strip(),
+            code=m.group(4) + "\n",
         )
         for m in _TEST_BLOCK.finditer(raw)
     ]

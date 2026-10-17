@@ -11,7 +11,12 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
-from app.agents.models import InvestigationPlan, PatchProposal, VerificationPlan
+from app.agents.models import (
+    AdversarialTest,
+    InvestigationPlan,
+    PatchProposal,
+    VerificationPlan,
+)
 from app.certificate import (
     FixCertificate,
     HypothesisRecord,
@@ -28,6 +33,7 @@ from app.repair.patching import (
     touched_paths,
 )
 from app.sandbox.base import SandboxRunner
+from app.verification.grounding import build_spec_corpus, check_grounding
 from app.verification.pytest_runner import run_pytest_check
 from app.verification.results import (
     CheckOutcome,
@@ -86,8 +92,11 @@ def _slug(name: str) -> str:
 def _feedback(checks: list[CheckResult]) -> str:
     lines: list[str] = []
     for check in checks:
-        if check.outcome in (CheckOutcome.PASSED, CheckOutcome.SKIPPED):
-            continue
+        if check.name not in MANDATORY_CHECKS or check.outcome in (
+            CheckOutcome.PASSED,
+            CheckOutcome.SKIPPED,
+        ):
+            continue  # unvalidated (ungrounded) findings are never fed back to the fixer
         lines.append(f"- check '{check.name}' {check.outcome.value}: {check.summary}")
         lines.extend(f"    counterexample: {c}" for c in check.counterexamples[:5])
         if check.output_excerpt and check.outcome == CheckOutcome.FAILED:
@@ -116,6 +125,7 @@ class RepairPipeline:
         self.planner = planner  # None => no adversarial phase (used for the baseline)
         self.investigator = investigator
         self.max_iterations = max(1, max_iterations)
+        self._spec_corpus = ""
         self.model_info = model_info
         self.on_event = on_event
 
@@ -143,6 +153,7 @@ class RepairPipeline:
             if self.on_event:
                 self.on_event(stage, message)
 
+        self._spec_corpus = build_spec_corpus(issue, source)
         event("snapshot", f"snapshot {cert.snapshot_sha256[:12]} of {source_label or source}")
 
         # 1. Reproduce the original failure (deterministic).
@@ -181,7 +192,7 @@ class RepairPipeline:
                 cert.limitations.append(f"investigation step failed: {exc}")
 
         # 3. Bounded repair loop. Fresh workspace per attempt; all mandatory checks re-run.
-        adv_suite: dict[str, str] = {}
+        adv_suite: dict[str, AdversarialTest] = {}
         seen_hashes: set[str] = set()
         feedback: str | None = None
         last_checks: list[CheckResult] = [red]
@@ -247,7 +258,7 @@ class RepairPipeline:
         proposal: PatchProposal,
         repro_targets: list[str],
         red: CheckResult,
-        adv_suite: dict[str, str],
+        adv_suite: dict[str, AdversarialTest],
         issue: str,
         record: IterationRecord,
         event: Callable[[str, str], None],
@@ -287,10 +298,10 @@ class RepairPipeline:
             event("verifying", f"regression: {regression.outcome.value} - {regression.summary}")
 
             if green.outcome != CheckOutcome.PASSED or regression.outcome != CheckOutcome.PASSED:
-                adversarial = _skipped("adversarial", "earlier blocking check did not pass")
+                adversarial = [_skipped("adversarial", "earlier blocking check did not pass")]
             else:
                 adversarial = self._adversarial(ws, proposal, red, adv_suite, issue, event)
-            return [scope, green, regression, adversarial]
+            return [scope, green, regression, *adversarial]
         finally:
             self.sandbox.destroy(ws)
 
@@ -299,12 +310,14 @@ class RepairPipeline:
         ws: Path,
         proposal: PatchProposal,
         red: CheckResult,
-        adv_suite: dict[str, str],
+        adv_suite: dict[str, AdversarialTest],
         issue: str,
         event: Callable[[str, str], None],
-    ) -> CheckResult:
+    ) -> list[CheckResult]:
+        """Returns [adversarial] (spec-grounded, mandatory) plus optionally
+        [adversarial_ungrounded] (unvalidated tests; a failure there is a condition, not a veto)."""
         if self.planner is None:
-            return _skipped("adversarial", "adversarial phase disabled")
+            return [_skipped("adversarial", "adversarial phase disabled")]
         event("planning_verification", "asking Nemotron to design adversarial tests")
         discarded: list[str] = []
         try:
@@ -314,10 +327,13 @@ class RepairPipeline:
                 prior_counterexamples=[f"existing adversarial test: {name}" for name in adv_suite],
             )  # fmt: skip
         except Exception as exc:  # noqa: BLE001
-            return CheckResult(
-                name="adversarial", outcome=CheckOutcome.ERROR,
-                summary=f"verification planner failed: {exc}",
-            )  # fmt: skip
+            return [
+                CheckResult(
+                    name="adversarial",
+                    outcome=CheckOutcome.ERROR,
+                    summary=f"verification planner failed: {exc}",
+                )  # fmt: skip
+            ]
         for test in plan.tests:
             slug = _slug(test.name)
             try:
@@ -326,30 +342,68 @@ class RepairPipeline:
                 discarded.append(f"{slug}: not valid Python ({exc.msg})")
                 continue
             key = slug
-            while key in adv_suite and adv_suite[key] != test.code:
+            while key in adv_suite and adv_suite[key].code != test.code:
                 key += "_x"
-            adv_suite[key] = test.code
+            grounded, note = check_grounding(test.spec_quote, self._spec_corpus)
+            adv_suite[key] = test.model_copy(update={"grounded": grounded, "grounding_note": note})
         if not adv_suite:
-            return CheckResult(
-                name="adversarial", outcome=CheckOutcome.ERROR,
-                summary="no executable adversarial tests were produced; discarded: "
-                + ("; ".join(discarded) or "none proposed"),
-            )  # fmt: skip
+            return [
+                CheckResult(
+                    name="adversarial",
+                    outcome=CheckOutcome.ERROR,
+                    summary="no executable adversarial tests were produced; discarded: "
+                    + ("; ".join(discarded) or "none proposed"),
+                )  # fmt: skip
+            ]
         adv_dir = ws / ADV_DIR
         adv_dir.mkdir(exist_ok=True)
-        for key, code in adv_suite.items():
-            (adv_dir / f"test_adv_{key}.py").write_text(code, encoding="utf-8")
-        event("verifying", f"executing {len(adv_suite)} adversarial test file(s)")
-        result = run_pytest_check(
-            self.sandbox,
-            ws,
-            name="adversarial",
-            targets=["--continue-on-collection-errors", ADV_DIR],
+        for key, test in adv_suite.items():
+            (adv_dir / f"test_adv_{key}.py").write_text(test.code, encoding="utf-8")
+        groups = {
+            True: [k for k, t in adv_suite.items() if t.grounded],
+            False: [k for k, t in adv_suite.items() if not t.grounded],
+        }
+        event(
+            "verifying",
+            f"executing {len(adv_suite)} adversarial test file(s): "
+            f"{len(groups[True])} spec-grounded, {len(groups[False])} ungrounded",
         )
+
+        def run_group(name: str, keys: list[str]) -> CheckResult:
+            result = run_pytest_check(
+                self.sandbox, ws, name=name, targets=["--continue-on-collection-errors"]
+                + [f"{ADV_DIR}/test_adv_{k}.py" for k in keys],
+            )  # fmt: skip
+            tagged = []
+            for counterexample in result.counterexamples:
+                owner = next((k for k in keys if f"test_adv_{k}" in counterexample), None)
+                quote = adv_suite[owner].spec_quote if owner else ""
+                tagged.append(f'{counterexample} [SPEC: "{quote}"]' if quote else counterexample)
+            result.counterexamples = tagged
+            return result
+
+        checks: list[CheckResult] = []
+        if groups[True]:
+            grounded_check = run_group("adversarial", groups[True])
+        else:
+            reasons = "; ".join(f"{k}: {t.grounding_note}" for k, t in adv_suite.items())
+            grounded_check = CheckResult(
+                name="adversarial", outcome=CheckOutcome.ERROR,
+                summary=f"no spec-grounded adversarial test was produced ({reasons})",
+            )  # fmt: skip
         if discarded:
-            result.summary += f" [{len(discarded)} model test(s) discarded: {'; '.join(discarded)}]"
-        event("verifying", f"adversarial: {result.outcome.value} - {result.summary}")
-        return result
+            grounded_check.summary += f" [{len(discarded)} discarded: {'; '.join(discarded)}]"
+        checks.append(grounded_check)
+        event(
+            "verifying", f"adversarial: {grounded_check.outcome.value} - {grounded_check.summary}"
+        )
+        if groups[False]:
+            ungrounded = run_group("adversarial_ungrounded", groups[False])
+            ungrounded.required = False
+            ungrounded.summary += " (unvalidated model assumptions; human review, not a veto)"
+            checks.append(ungrounded)
+            event("verifying", f"adversarial_ungrounded: {ungrounded.outcome.value}")
+        return checks
 
     def _finish(self, cert: FixCertificate, checks: list[CheckResult]) -> FixCertificate:
         cert.checks = checks
