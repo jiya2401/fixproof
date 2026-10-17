@@ -8,7 +8,7 @@ from pathlib import Path
 
 from app.config import get_settings
 from app.sandbox.base import CommandResult, SandboxRunner
-from app.sandbox.local import _IGNORE, MAX_OUTPUT_CHARS
+from app.sandbox.common import _IGNORE, MAX_OUTPUT_CHARS
 from app.verification.results import SandboxInfo
 
 
