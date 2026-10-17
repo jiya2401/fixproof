@@ -5,17 +5,23 @@ from app.llm.nebius import NebiusClient
 SYSTEM_PROMPT = """You are FixProof's repair agent.
 Propose the smallest patch supported by the evidence. Preserve unrelated behavior and honor
 documented contracts (docstrings, specs) in the code you touch.
-Rules: output a unified diff against the repository root (paths like a/pkg/mod.py ->
-b/pkg/mod.py). Never modify test files, conftest.py or test configuration; patches that do
-are rejected automatically. Do not claim the patch is correct: verification happens outside
-the language model. When given counterexamples from earlier attempts, fix the underlying
-cause rather than special-casing the failing inputs.
+Express the patch as SEARCH/REPLACE edit blocks; do NOT write a unified diff or line numbers.
+Rules: SEARCH must be copied exactly from the current file (same indentation) and must match
+exactly once, so include enough surrounding lines to be unique. Paths are relative to the
+repository root. Never edit test files, conftest.py or test configuration; such patches are
+rejected automatically. Do not claim the patch is correct: verification happens outside the
+language model. When given feedback from earlier attempts, fix the underlying cause rather than
+special-casing the failing inputs, and correct any edit that failed to match.
 Reply in exactly this format and nothing else:
 SUMMARY: <one line>
 RATIONALE: <one or two lines>
-```diff
-<unified diff>
-```"""
+FILE: <path>
+<<<<<<< SEARCH
+<exact existing text>
+=======
+<replacement text>
+>>>>>>> REPLACE
+(repeat the FILE block for each edit)"""
 
 
 class FixAgent:

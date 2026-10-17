@@ -6,6 +6,7 @@ sandbox, parsing results, deciding the verdict. The model never grades its own p
 """
 
 import ast
+import json
 import re
 from collections.abc import Callable
 from pathlib import Path
@@ -24,6 +25,7 @@ from app.certificate import (
     ModelInfo,
     TimelineEvent,
 )
+from app.repair.edits import build_diff_from_edits
 from app.repair.patching import (
     apply_patch,
     is_protected_path,
@@ -211,10 +213,15 @@ class RepairPipeline:
                 cert.iterations.append(record)
                 cert.limitations.append(f"iteration {index}: model call failed: {exc}")
                 break
+            if proposal.edits:
+                proposal.diff, proposal.edit_errors = build_diff_from_edits(source, proposal.edits)
             record.summary, record.rationale, record.diff = (
                 proposal.summary, proposal.rationale, proposal.diff,
             )  # fmt: skip
-            record.patch_sha256 = normalized_patch_hash(proposal.diff)
+            record.patch_sha256 = normalized_patch_hash(
+                proposal.diff
+                or json.dumps([e.model_dump() for e in proposal.edits], sort_keys=True)
+            )
             if record.patch_sha256 in seen_hashes:
                 record.note = "repeated an earlier patch; stopping"
                 cert.iterations.append(record)
@@ -265,7 +272,7 @@ class RepairPipeline:
     ) -> list[CheckResult]:
         ws = self.sandbox.prepare_workspace(source)
         try:
-            problems = patch_violations(proposal.diff)
+            problems = proposal.edit_errors or patch_violations(proposal.diff)
             applied = False
             if problems:
                 scope = CheckResult(

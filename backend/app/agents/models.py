@@ -14,10 +14,18 @@ class InvestigationPlan(BaseModel):
     confidence_notes: str = ""
 
 
+class FileEdit(BaseModel):
+    path: str
+    search: str  # must match the current file text exactly, and exactly once
+    replace: str
+
+
 class PatchProposal(BaseModel):
     summary: str
     rationale: str
-    diff: str
+    diff: str = ""  # produced by code from `edits`, or supplied directly (legacy diff reply)
+    edits: list[FileEdit] = Field(default_factory=list)
+    edit_errors: list[str] = Field(default_factory=list)
 
 
 class AdversarialTest(BaseModel):

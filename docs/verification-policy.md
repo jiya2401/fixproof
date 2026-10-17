@@ -17,6 +17,14 @@ A check that "passes" while executing **zero** tests is treated as `not_run`.
 Tests skipped inside pytest are not counted as executed.
 A **counterexample** (`failed`) is distinct from an **execution failure** (`error`).
 
+## Patch format
+
+The model proposes SEARCH/REPLACE edits (exact text, must match exactly once); deterministic
+code verifies them and generates the unified diff (`repair/edits.py`). A failed match is fed back
+with the closest line in the file. Reason: a live Nemotron patch used bare `@@` hunk headers and
+was rejected by `git apply`; models are unreliable at diff line numbers. A fenced unified diff is
+still accepted as a fallback.
+
 ## Mandatory checks
 
 `reproduction_red` (precondition) · `patch_applies_in_scope` · `reproduction_green` ·

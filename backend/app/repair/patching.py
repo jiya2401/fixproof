@@ -128,6 +128,11 @@ def apply_patch(workspace: Path, diff: str) -> tuple[bool, str]:
         )  # fmt: skip
         if done.returncode != 0:
             message = (done.stderr or done.stdout).decode("utf-8", "replace").strip()
+            if "No valid patches" in message:
+                message += (
+                    " (hunk headers must carry line numbers, e.g. '@@ -1,9 +1,11 @@'; "
+                    "prefer SEARCH/REPLACE edits)"
+                )
             return False, message[:2000]
     return True, "applied"
 

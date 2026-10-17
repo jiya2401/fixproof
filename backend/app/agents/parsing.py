@@ -6,9 +6,14 @@ live Nemotron reply). These formats put code in fenced blocks and parse them det
 
 import re
 
-from app.agents.models import AdversarialTest, PatchProposal, VerificationPlan
+from app.agents.models import AdversarialTest, FileEdit, PatchProposal, VerificationPlan
 
 _DIFF_BLOCK = re.compile(r"```(?:diff|patch)?[ \t]*\n(.*?)\n```", re.DOTALL)
+_EDIT_BLOCK = re.compile(
+    r"^FILE:[ \t]*(\S+)[ \t]*\n<<<<<<< SEARCH[ \t]*\n(.*?)\n?=======[ \t]*\n"
+    r"(.*?)\n?>>>>>>> REPLACE",
+    re.MULTILINE | re.DOTALL,
+)
 _TEST_BLOCK = re.compile(
     r"^###[ \t]*TEST[ \t]+([A-Za-z0-9_\-]+)[^\n]*\n(?:RATIONALE:[ \t]*([^\n]*)\n)?"
     r"(?:SPEC:[ \t]*([^\n]*)\n)?"
@@ -23,9 +28,22 @@ def _field(text: str, name: str) -> str:
 
 
 def parse_patch_reply(raw: str) -> PatchProposal:
+    """Parse SEARCH/REPLACE edit blocks (preferred) or, as a fallback, one fenced unified diff."""
+    edits = [
+        FileEdit(path=m.group(1), search=m.group(2), replace=m.group(3))
+        for m in _EDIT_BLOCK.finditer(raw)
+    ]
+    first = _EDIT_BLOCK.search(raw)
+    if edits and first:
+        head = raw[: first.start()]
+        return PatchProposal(
+            summary=_field(head, "SUMMARY") or "model-proposed patch",
+            rationale=_field(head, "RATIONALE"),
+            edits=edits,
+        )
     block = _DIFF_BLOCK.search(raw)
     if not block:
-        raise ValueError("no fenced ```diff block found")
+        raise ValueError("no FILE/SEARCH/REPLACE edit blocks and no fenced ```diff block found")
     diff = block.group(1)
     if "--- " not in diff or "+++ " not in diff:
         raise ValueError("fenced block is not a unified diff (missing ---/+++ headers)")
