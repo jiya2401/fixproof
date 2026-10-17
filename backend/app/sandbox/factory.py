@@ -15,7 +15,12 @@ def get_sandbox() -> SandboxRunner:
             sandbox = DockerSandbox()
         except DockerUnavailable as exc:
             raise SandboxUnavailable(f"Docker sandbox unavailable: {exc}") from exc
-        sandbox.self_test()
+        failures = sandbox.self_test()
+        if failures:
+            raise SandboxUnavailable(
+                f"Docker sandbox self-test failed ({', '.join(failures)}). Run the server-side "
+                "diagnostic in docs/audit.md or check `docker run` manually."
+            )
         return sandbox
     if mode == "local":
         from app.sandbox.local import LocalSandbox, UnsafeLocalExecutionDisabled

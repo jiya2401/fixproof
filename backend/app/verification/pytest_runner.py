@@ -93,6 +93,11 @@ def run_pytest_check(
         else:
             check.outcome = CheckOutcome.FAILED
             check.summary = f"{len(failing)} failing test(s)"
+    elif result.exit_code in (125, 126, 127) and not stats["tests"]:
+        # `docker run` itself failed (or the command could not start): infrastructure, not tests.
+        check.outcome = CheckOutcome.ERROR
+        first = next((ln for ln in result.stderr.splitlines() if ln.strip()), "no stderr")
+        check.summary = f"sandbox/infrastructure failure (exit {result.exit_code}): {first[:300]}"
     else:
         check.outcome = CheckOutcome.ERROR
         detail = erroring[0] if erroring else f"pytest exit code {result.exit_code}"
