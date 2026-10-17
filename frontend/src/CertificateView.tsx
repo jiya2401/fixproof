@@ -139,6 +139,27 @@ export default function CertificateView({ cert }: { cert: Certificate }) {
         </div>
       </Card>
 
+      {cert.adversarial_tests.length > 0 && (
+        <Card title={`Adversarial tests executed (${cert.adversarial_tests.length}, model-authored)`}>
+          <div className="space-y-2">
+            {cert.adversarial_tests.map((t) => (
+              <details key={t.name} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+                <summary className="cursor-pointer text-sm">
+                  <span className={t.grounded ? 'text-emerald-400' : 'text-amber-400'}>
+                    {t.grounded ? 'spec-grounded' : 'ungrounded'}
+                  </span>{' '}
+                  {t.name} <span className="text-zinc-500">{t.rationale}</span>
+                </summary>
+                <p className="mt-2 text-xs text-zinc-400">
+                  SPEC: “{t.spec_quote || 'none given'}” — {t.grounding_note}
+                </p>
+                <pre className="mt-2 max-h-64 overflow-auto rounded bg-black/50 p-3 text-xs">{t.code}</pre>
+              </details>
+            ))}
+          </div>
+        </Card>
+      )}
+
       <div className="grid gap-4 md:grid-cols-2">
         <Card title="Root cause (model-proposed, untested)">
           <p className="text-sm text-zinc-300">{cert.selected_root_cause || 'none recorded'}</p>

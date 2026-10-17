@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from app.agents.models import AdversarialTest
 from app.verification.results import (
     CheckOutcome,
     CheckResult,
@@ -99,6 +100,8 @@ class FixCertificate(BaseModel):
     checks: list[CheckResult] = Field(default_factory=list)
     unexecuted_checks: list[str] = Field(default_factory=list)
     iterations: list[IterationRecord] = Field(default_factory=list)
+    # Every model-authored test that was executed, with its spec quote, so passes can be audited.
+    adversarial_tests: list[AdversarialTest] = Field(default_factory=list)
     max_iterations: int = 0
 
     limitations: list[str] = Field(default_factory=list)

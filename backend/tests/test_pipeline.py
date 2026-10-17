@@ -213,6 +213,12 @@ def test_ungrounded_failing_test_is_a_condition_not_a_veto_and_not_fed_back(auth
     grounded = check(cert, "adversarial", 0)
     ungrounded = check(cert, "adversarial_ungrounded", 0)
     assert grounded.outcome == CheckOutcome.PASSED and grounded.tests_executed == 1
+    recorded = {t.name: t for t in cert.adversarial_tests}
+    assert recorded["unknown_token_type"].grounded and recorded["unknown_token_type"].spec_quote
+    assert (
+        not recorded["space_after_colon"].grounded
+        and "def test_" in recorded["space_after_colon"].code
+    )
     assert ungrounded.outcome == CheckOutcome.FAILED and not ungrounded.required
     assert len(cert.iterations) == 1 and fixer.calls == [None]  # nothing fed back
     assert cert.verdict == VerificationVerdict.VERIFIED_WITH_CONDITIONS

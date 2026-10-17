@@ -128,6 +128,7 @@ class RepairPipeline:
         self.investigator = investigator
         self.max_iterations = max(1, max_iterations)
         self._spec_corpus = ""
+        self._adv_suite: dict[str, AdversarialTest] = {}
         self.model_info = model_info
         self.on_event = on_event
 
@@ -195,6 +196,7 @@ class RepairPipeline:
 
         # 3. Bounded repair loop. Fresh workspace per attempt; all mandatory checks re-run.
         adv_suite: dict[str, AdversarialTest] = {}
+        self._adv_suite = adv_suite
         seen_hashes: set[str] = set()
         feedback: str | None = None
         last_checks: list[CheckResult] = [red]
@@ -414,6 +416,7 @@ class RepairPipeline:
 
     def _finish(self, cert: FixCertificate, checks: list[CheckResult]) -> FixCertificate:
         cert.checks = checks
+        cert.adversarial_tests = list(self._adv_suite.values())
         info = self.model_info() if self.model_info else {}
         cert.model = ModelInfo(**info) if info else ModelInfo()
         report = VerificationReport(

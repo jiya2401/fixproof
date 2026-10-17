@@ -36,6 +36,15 @@ export type Iteration = {
   note: string
 }
 
+export type AdversarialTest = {
+  name: string
+  rationale: string
+  spec_quote: string
+  grounded: boolean
+  grounding_note: string
+  code: string
+}
+
 export type Certificate = {
   certificate_id: string
   policy_version: string
@@ -69,6 +78,7 @@ export type Certificate = {
   checks: Check[]
   unexecuted_checks: string[]
   iterations: Iteration[]
+  adversarial_tests: AdversarialTest[]
   max_iterations: number
   limitations: string[]
   disclaimers: string[]
