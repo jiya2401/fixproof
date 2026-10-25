@@ -98,6 +98,7 @@ class NebiusClient:
         """Run `parser` over a plain-text reply; one corrective retry on ValueError."""
         prompt = user
         last_error: Exception | None = None
+        raw = ""
         for _ in range(2):
             raw = self.complete(system=system, user=prompt, temperature=0.0)
             try:
@@ -109,7 +110,9 @@ class NebiusClient:
                     f"{user}\n\nYour previous reply could not be parsed: {str(exc)[:300]}\n"
                     "Reply again using exactly the required format."
                 )
-        raise ModelOutputError(f"Nemotron reply failed parsing: {last_error}")
+        raise ModelOutputError(
+            f"Nemotron reply failed parsing: {last_error}; reply began: {raw[:200]!r}"
+        )
 
     def complete_model(self, *, system: str, user: str, schema: type[T]) -> T:
         """Return a validated `schema` instance; one corrective retry on malformed output."""

@@ -67,6 +67,14 @@ budget.* The certificate lists exactly what ran and what did not.
   live run: a test required rejecting `"refresh: abc123"`, which no stated rule covers), but a grounded
   test can still over-interpret its quote, and a passing one may be weak. Treat counterexamples as
   candidates for human review; mutation testing is not implemented.
+- **Observed false counterexample that grounding cannot catch (live run, paginate case):** a test quoted
+  the real docstring sentence about a page past the end, then asserted `paginate([1,2,3,4,5], 3, 2) == []`.
+  Page 3 is `[5]` (the last partial page), so the assertion was wrong. A wrong grounded test fails every
+  later patch, so the loop cannot reach `VERIFIED`; the verdict is then `NOT_VERIFIED` through no fault of the
+  patch. The benchmark reports this as the false-rejection rate. Not mitigated yet; possible mitigations
+  (human dispute with the exclusion recorded as a condition; annotation-only model review) are not built.
+- If the test-author reply cannot be parsed in an iteration, tests from earlier iterations still run and
+  a limitation is recorded (verdict at most `VERIFIED_WITH_CONDITIONS`).
 - Hypotheses are not experimentally discriminated (recorded as `proposed_untested`).
 - Local-process sandbox mode caps every verdict at `VERIFIED_WITH_CONDITIONS` by design.
 

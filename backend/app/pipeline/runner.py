@@ -199,6 +199,8 @@ class RepairPipeline:
         self._adv_suite = adv_suite
         seen_hashes: set[str] = set()
         feedback: str | None = None
+        history: list[str] = []  # every counterexample seen so far
+        repeat_streak = 0
         last_checks: list[CheckResult] = [red]
         last_good_iteration: IterationRecord | None = None
 
@@ -225,10 +227,19 @@ class RepairPipeline:
                 or json.dumps([e.model_dump() for e in proposal.edits], sort_keys=True)
             )
             if record.patch_sha256 in seen_hashes:
-                record.note = "repeated an earlier patch; stopping"
+                repeat_streak += 1
+                record.note = "repeated an earlier patch"
                 cert.iterations.append(record)
                 event("repairing", record.note)
-                break
+                if repeat_streak >= 2:
+                    record.note += "; stopping"
+                    break
+                feedback = (feedback or "") + (
+                    "\nYour last patch was IDENTICAL to an earlier rejected attempt. "
+                    "Do not resubmit it; change the approach so every counterexample passes."
+                )
+                continue
+            repeat_streak = 0
             seen_hashes.add(record.patch_sha256)
 
             checks = self._verify(
@@ -249,11 +260,21 @@ class RepairPipeline:
             ]
             if not blocking:
                 break
+            for counterexample in record.counterexamples:
+                if counterexample not in history:
+                    history.append(counterexample)
             feedback = _feedback(checks)
+            if history:
+                feedback += (
+                    "\nAll counterexamples found so far (the next patch must satisfy every one):\n"
+                    + "\n".join(f"- {c}" for c in history)
+                )
             event(
                 "repairing", f"iteration {index} rejected: " + ", ".join(c.name for c in blocking)
             )
 
+        if last_good_iteration is not None and "planner failed" in last_good_iteration.note:
+            cert.limitations.append(last_good_iteration.note)
         if last_good_iteration is not None:
             cert.final_patch = last_good_iteration.diff
             cert.final_patch_sha256 = last_good_iteration.patch_sha256
@@ -309,7 +330,7 @@ class RepairPipeline:
             if green.outcome != CheckOutcome.PASSED or regression.outcome != CheckOutcome.PASSED:
                 adversarial = [_skipped("adversarial", "earlier blocking check did not pass")]
             else:
-                adversarial = self._adversarial(ws, proposal, red, adv_suite, issue, event)
+                adversarial = self._adversarial(ws, proposal, red, adv_suite, issue, event, record)
             return [scope, green, regression, *adversarial]
         finally:
             self.sandbox.destroy(ws)
@@ -322,6 +343,7 @@ class RepairPipeline:
         adv_suite: dict[str, AdversarialTest],
         issue: str,
         event: Callable[[str, str], None],
+        record: IterationRecord,
     ) -> list[CheckResult]:
         """Returns [adversarial] (spec-grounded, mandatory) plus optionally
         [adversarial_ungrounded] (unvalidated tests; a failure there is a condition, not a veto)."""
@@ -329,6 +351,8 @@ class RepairPipeline:
             return [_skipped("adversarial", "adversarial phase disabled")]
         event("planning_verification", "asking Nemotron to design adversarial tests")
         discarded: list[str] = []
+        planner_error: str | None = None
+        plan = None
         try:
             plan = self.planner.plan(
                 issue=issue, patch_diff=proposal.diff, reproduction_evidence=red.output_excerpt,
@@ -336,14 +360,9 @@ class RepairPipeline:
                 prior_counterexamples=[f"existing adversarial test: {name}" for name in adv_suite],
             )  # fmt: skip
         except Exception as exc:  # noqa: BLE001
-            return [
-                CheckResult(
-                    name="adversarial",
-                    outcome=CheckOutcome.ERROR,
-                    summary=f"verification planner failed: {exc}",
-                )  # fmt: skip
-            ]
-        for test in plan.tests:
+            planner_error = str(exc)
+            event("planning_verification", f"planner failed: {planner_error[:200]}")
+        for test in plan.tests if plan else []:
             slug = _slug(test.name)
             try:
                 ast.parse(test.code)
@@ -356,14 +375,13 @@ class RepairPipeline:
             grounded, note = check_grounding(test.spec_quote, self._spec_corpus)
             adv_suite[key] = test.model_copy(update={"grounded": grounded, "grounding_note": note})
         if not adv_suite:
-            return [
-                CheckResult(
-                    name="adversarial",
-                    outcome=CheckOutcome.ERROR,
-                    summary="no executable adversarial tests were produced; discarded: "
-                    + ("; ".join(discarded) or "none proposed"),
-                )  # fmt: skip
-            ]
+            why = (
+                f"verification planner failed: {planner_error}"
+                if planner_error
+                else "no executable adversarial tests were produced; discarded: "
+                + ("; ".join(discarded) or "none proposed")
+            )
+            return [CheckResult(name="adversarial", outcome=CheckOutcome.ERROR, summary=why)]
         adv_dir = ws / ADV_DIR
         adv_dir.mkdir(exist_ok=True)
         for key, test in adv_suite.items():
@@ -400,6 +418,12 @@ class RepairPipeline:
                 name="adversarial", outcome=CheckOutcome.ERROR,
                 summary=f"no spec-grounded adversarial test was produced ({reasons})",
             )  # fmt: skip
+        if planner_error:
+            record.note = (
+                f"planner failed this iteration ({planner_error[:150]}); "
+                f"patch checked only against {len(adv_suite)} earlier test(s)"
+            )
+            grounded_check.summary += f" [{record.note}]"
         if discarded:
             grounded_check.summary += f" [{len(discarded)} discarded: {'; '.join(discarded)}]"
         checks.append(grounded_check)

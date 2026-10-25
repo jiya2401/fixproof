@@ -70,13 +70,15 @@ def test_baseline_would_accept_the_weak_fix_that_fixproof_rejects(auth_src) -> N
     assert baseline.verdict == VerificationVerdict.INSUFFICIENT_EVIDENCE
 
 
-def test_iteration_budget_is_bounded_and_ends_not_verified(auth_src) -> None:
+def test_repeated_patch_gets_one_warning_then_stops(auth_src) -> None:
     fixer = ScriptedFixer([fixture_text("auth_weak.diff")])
     cert = run(
-        auth_src, fixer, ScriptedPlanner([AUTH_ADVERSARIAL]), ["test_auth.py"], max_iterations=3
+        auth_src, fixer, ScriptedPlanner([AUTH_ADVERSARIAL]), ["test_auth.py"], max_iterations=5
     )
-    # Same patch twice => repeat detected on iteration 2, loop stops early.
-    assert len(cert.iterations) == 2 and "repeated" in cert.iterations[1].note
+    notes = [i.note for i in cert.iterations]
+    assert len(cert.iterations) == 3  # verified once, warned on first repeat, stopped on second
+    assert "repeated" in notes[1] and "stopping" in notes[2]
+    assert "IDENTICAL" in (fixer.calls[2] or "")
     assert cert.verdict == VerificationVerdict.NOT_VERIFIED
 
 
@@ -250,3 +252,58 @@ def test_only_ungrounded_tests_means_insufficient_evidence(auth_src) -> None:
     adv = check(cert, "adversarial")
     assert adv.outcome == CheckOutcome.ERROR and "no spec-grounded" in adv.summary
     assert cert.verdict == VerificationVerdict.INSUFFICIENT_EVIDENCE
+
+
+# --- planner failures and cumulative feedback ------------------------------------------------
+
+
+class FlakyPlanner:
+    """Succeeds on the first call, then fails like a malformed live Nemotron reply."""
+
+    def __init__(self, tests) -> None:
+        self.tests, self.calls = tests, 0
+
+    def plan(self, **_kwargs):
+        self.calls += 1
+        if self.calls > 1:
+            raise RuntimeError("Nemotron reply failed parsing: no TEST blocks")
+        return ScriptedPlanner(self.tests).plan()
+
+
+def test_planner_failure_still_runs_earlier_tests_and_is_a_condition(auth_src) -> None:
+    fixer = ScriptedFixer([fixture_text("auth_weak.diff"), fixture_text("auth_correct.diff")])
+    cert = run(auth_src, fixer, FlakyPlanner([AUTH_ADVERSARIAL]), ["test_auth.py"])
+    second = check(cert, "adversarial", 1)
+    assert second.outcome == CheckOutcome.PASSED and second.tests_executed == 1  # old test ran
+    assert "planner failed" in second.summary
+    assert cert.verdict == VerificationVerdict.VERIFIED_WITH_CONDITIONS
+    assert any("planner failed" in lim for lim in cert.limitations)
+
+
+def test_planner_failure_with_no_earlier_tests_is_insufficient(auth_src) -> None:
+    class AlwaysFails:
+        def plan(self, **_):
+            raise RuntimeError("boom")
+
+    cert = run(
+        auth_src, ScriptedFixer([fixture_text("auth_correct.diff")]), AlwaysFails(),
+        ["test_auth.py"], max_iterations=1,
+    )  # fmt: skip
+    adv = check(cert, "adversarial")
+    assert adv.outcome == CheckOutcome.ERROR and "planner failed" in adv.summary
+    assert cert.verdict == VerificationVerdict.INSUFFICIENT_EVIDENCE
+
+
+def test_feedback_accumulates_counterexamples_across_attempts(auth_src) -> None:
+    weak2 = fixture_text("auth_weak.diff").replace(
+        '+    return token_type != "access"', '+    return bool(token_type != "access")'
+    )
+    fixer = ScriptedFixer(
+        [fixture_text("auth_weak.diff"), weak2, fixture_text("auth_correct.diff")]
+    )
+    cert = run(
+        auth_src, fixer, FlakyPlanner([AUTH_ADVERSARIAL]), ["test_auth.py"], max_iterations=3
+    )
+    third = fixer.calls[2] or ""
+    assert "All counterexamples found so far" in third and "unknown_token_type" in third
+    assert cert.verdict == VerificationVerdict.VERIFIED_WITH_CONDITIONS

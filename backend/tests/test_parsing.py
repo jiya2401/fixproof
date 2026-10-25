@@ -48,3 +48,23 @@ def test_complete_parsed_retries_once_then_succeeds() -> None:
     client = make_client(["oops", good])
     assert "refresh" in client.complete_parsed(system="s", user="u", parser=parse_patch_reply).diff
     assert client.usage.retries_for_malformed_output == 1
+
+
+def test_verification_reply_tolerates_header_variants() -> None:
+    raw = (
+        "## Test 1: first_case\nRATIONALE: r\nspec: Return True only for refresh tokens\n"
+        "```python\ndef test_a():\n    assert True\n```\n"
+        "#### TEST: second_case\n```python\ndef test_b():\n    assert True\n```\n"
+    )
+    plan = parse_verification_reply(raw)
+    assert len(plan.tests) == 2 and plan.tests[1].name == "second_case"
+
+
+def test_parse_failure_message_quotes_the_start_of_the_reply() -> None:
+    import pytest as _pytest
+
+    from app.llm.nebius import ModelOutputError
+
+    client = make_client(["Sure! Here are my thoughts...", "still no blocks here"])
+    with _pytest.raises(ModelOutputError, match="reply began: 'still no blocks"):
+        client.complete_parsed(system="s", user="u", parser=parse_verification_reply)

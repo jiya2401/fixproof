@@ -15,10 +15,10 @@ _EDIT_BLOCK = re.compile(
     re.MULTILINE | re.DOTALL,
 )
 _TEST_BLOCK = re.compile(
-    r"^###[ \t]*TEST[ \t]+([A-Za-z0-9_\-]+)[^\n]*\n(?:RATIONALE:[ \t]*([^\n]*)\n)?"
+    r"^#{2,4}[ \t]*TEST[ \t]*[:#\-]?[ \t]*([A-Za-z0-9_\-]+)[^\n]*\n(?:RATIONALE:[ \t]*([^\n]*)\n)?"
     r"(?:SPEC:[ \t]*([^\n]*)\n)?"
     r"```(?:python)?[ \t]*\n(.*?)\n```",
-    re.MULTILINE | re.DOTALL,
+    re.MULTILINE | re.DOTALL | re.IGNORECASE,
 )
 
 
