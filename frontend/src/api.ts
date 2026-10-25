@@ -102,6 +102,7 @@ export type AboutResponse = {
   nebius_configured: boolean
   sandbox_mode: string
   example_cases: string[]
+  example_issues: Record<string, string>
   implemented_now: string[]
   not_implemented: string[]
 }

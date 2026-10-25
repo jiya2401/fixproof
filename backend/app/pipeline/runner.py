@@ -16,6 +16,7 @@ from app.agents.models import (
     AdversarialTest,
     InvestigationPlan,
     PatchProposal,
+    ReviewResult,
     VerificationPlan,
 )
 from app.certificate import (
@@ -67,6 +68,10 @@ class Planner(Protocol):
     ) -> VerificationPlan: ...
 
 
+class Reviewer(Protocol):
+    def review(self, *, issue: str, patch_diff: str, relevant_code: str) -> ReviewResult: ...
+
+
 class Investigator(Protocol):
     def plan(self, *, issue: str, evidence: str, relevant_code: str) -> InvestigationPlan: ...
 
@@ -94,7 +99,9 @@ def _slug(name: str) -> str:
 def _feedback(checks: list[CheckResult]) -> str:
     lines: list[str] = []
     for check in checks:
-        if check.name not in MANDATORY_CHECKS or check.outcome in (
+        if (
+            check.name not in MANDATORY_CHECKS and check.name != "self_review"
+        ) or check.outcome in (
             CheckOutcome.PASSED,
             CheckOutcome.SKIPPED,
         ):
@@ -118,6 +125,7 @@ class RepairPipeline:
         fixer: Fixer,
         planner: Planner | None,
         investigator: Investigator | None = None,
+        reviewer: Reviewer | None = None,
         max_iterations: int = 3,
         model_info: Callable[[], dict[str, Any]] | None = None,
         on_event: Callable[[str, str], None] | None = None,
@@ -126,6 +134,7 @@ class RepairPipeline:
         self.fixer = fixer
         self.planner = planner  # None => no adversarial phase (used for the baseline)
         self.investigator = investigator
+        self.reviewer = reviewer  # comparison baseline only (LLM reviews LLM, nothing executed)
         self.max_iterations = max(1, max_iterations)
         self._spec_corpus = ""
         self._adv_suite: dict[str, AdversarialTest] = {}
@@ -257,7 +266,7 @@ class RepairPipeline:
                 and c.outcome != CheckOutcome.PASSED
                 # Baseline mode (no planner) has no adversarial phase to wait for.
                 and not (c.name == "adversarial" and self.planner is None)
-            ]
+            ] + [c for c in checks if c.name == "self_review" and c.outcome == CheckOutcome.FAILED]
             if not blocking:
                 break
             for counterexample in record.counterexamples:
@@ -331,9 +340,37 @@ class RepairPipeline:
                 adversarial = [_skipped("adversarial", "earlier blocking check did not pass")]
             else:
                 adversarial = self._adversarial(ws, proposal, red, adv_suite, issue, event, record)
+            if self.reviewer is not None and self.planner is None:
+                if (
+                    green.outcome == CheckOutcome.PASSED
+                    and regression.outcome == CheckOutcome.PASSED
+                ):
+                    adversarial.append(self._review(ws, proposal, issue, event))
             return [scope, green, regression, *adversarial]
         finally:
             self.sandbox.destroy(ws)
+
+    def _review(
+        self, ws: Path, proposal: PatchProposal, issue: str, event: Callable[[str, str], None]
+    ) -> CheckResult:
+        """Baseline-only: model self-review. An ERROR here counts as 'no objection'."""
+        assert self.reviewer is not None
+        event("reviewing", "asking Nemotron to review its own patch (baseline, nothing executed)")
+        try:
+            result = self.reviewer.review(
+                issue=issue, patch_diff=proposal.diff, relevant_code=collect_code(ws)
+            )
+        except Exception as exc:  # noqa: BLE001
+            return CheckResult(
+                name="self_review", required=False, outcome=CheckOutcome.ERROR,
+                summary=f"review failed, treated as no objection: {exc}",
+            )  # fmt: skip
+        return CheckResult(
+            name="self_review", required=False,
+            outcome=CheckOutcome.PASSED if result.accept else CheckOutcome.FAILED,
+            summary="reviewer accepted" if result.accept else "reviewer rejected",
+            counterexamples=[] if result.accept else list(result.defects),
+        )  # fmt: skip
 
     def _adversarial(
         self,

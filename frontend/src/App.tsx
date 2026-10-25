@@ -8,10 +8,6 @@ import {
   type Certificate,
 } from './api'
 
-const ISSUES: Record<string, string> = {
-  'buggy-python-app': 'validate_refresh_token() accepts access tokens and rejects refresh tokens.',
-  'paginate-app': 'paginate() returns the wrong slice: page 2 of [1..7] with per_page=3 returns [7].',
-}
 
 export default function App() {
   const [about, setAbout] = useState<AboutResponse | null>(null)
@@ -30,7 +26,7 @@ export default function App() {
     setCert(null)
     try {
       setStage('starting')
-      const id = await startExampleRun(exampleCase, ISSUES[exampleCase])
+      const id = await startExampleRun(exampleCase, about?.example_issues[exampleCase] ?? '')
       for (;;) {
         const state = await getInvestigation(id)
         setStage(state.stage)
@@ -76,7 +72,7 @@ export default function App() {
               value={exampleCase}
               onChange={(e) => setExampleCase(e.target.value)}
             >
-              {(about?.example_cases ?? Object.keys(ISSUES)).map((c) => (
+              {(about?.example_cases ?? []).map((c) => (
                 <option key={c}>{c}</option>
               ))}
             </select>

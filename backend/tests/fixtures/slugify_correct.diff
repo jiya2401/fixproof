@@ -1,0 +1,10 @@
+--- a/slugify.py
++++ b/slugify.py
+@@ -6,4 +6,6 @@
+     - Every run of other characters becomes a single ``-``.
+     - No leading or trailing ``-``; input with no letters or digits gives ``""``.
+     """
+-    return text.lower()
++    import re
++
++    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")

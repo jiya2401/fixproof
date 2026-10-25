@@ -6,6 +6,7 @@ from pydantic import BaseModel, HttpUrl
 
 from app.certificate import FixCertificate
 from app.config import get_settings
+from app.evaluation import load_cases
 from app.llm.nebius import NebiusConfigurationError
 from app.orchestrator.state import InvestigationStage, InvestigationState
 from app.pipeline import factory
@@ -18,10 +19,9 @@ _INVESTIGATIONS: dict[str, InvestigationState] = {}
 EXAMPLES_ROOT = Path(__file__).resolve().parents[3] / "examples"
 # Allowlist: this release repairs only bundled example repositories. Arbitrary repository
 # URLs are recorded but not cloned or executed (untrusted-code policy).
-EXAMPLE_CASES: dict[str, list[str]] = {
-    "buggy-python-app": ["test_auth.py"],
-    "paginate-app": ["test_paginate.py::test_second_page_returns_items_4_to_6"],
-}
+_CASES = load_cases()
+EXAMPLE_CASES: dict[str, list[str]] = {Path(c.source).name: c.repro_targets for c in _CASES}
+EXAMPLE_ISSUES: dict[str, str] = {Path(c.source).name: c.issue for c in _CASES}
 _STAGE_MAP = {
     "reproducing": InvestigationStage.REPRODUCING,
     "investigating": InvestigationStage.INVESTIGATING,
@@ -50,6 +50,7 @@ def about() -> dict[str, Any]:
         "nebius_configured": bool(settings.nebius_api_key),
         "sandbox_mode": settings.sandbox_mode,
         "example_cases": sorted(EXAMPLE_CASES),
+        "example_issues": EXAMPLE_ISSUES,
         "implemented_now": [
             "red/green reproduction",
             "patch scope validation + apply",

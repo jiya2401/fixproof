@@ -1,0 +1,9 @@
+{
+  "name": "truncate",
+  "source": "examples/truncate-app",
+  "issue": "truncate('hello world', 8) returns 'hello wo...' (11 characters), which is longer than the requested width of 8.",
+  "repro_targets": [
+    "test_truncate.py::test_long_text_fits_the_width"
+  ],
+  "oracle_dir": "evals/cases/truncate/oracle"
+}

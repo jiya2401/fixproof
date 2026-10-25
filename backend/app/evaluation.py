@@ -107,13 +107,15 @@ def score_trial(
     final = {c.name: c for c in cert.checks}
     last = cert.iterations[-1].checks if cert.iterations else []
     last_by = {c.name: c for c in last}
-    if mode == "baseline":
+    if mode in ("baseline", "review"):
+        review = last_by.get("self_review")
         accepted = bool(
             cert.final_patch
             and last_by.get("reproduction_green")
             and last_by["reproduction_green"].outcome == CheckOutcome.PASSED
             and last_by.get("regression")
             and last_by["regression"].outcome == CheckOutcome.PASSED
+            and not (review and review.outcome == CheckOutcome.FAILED)
         )
     else:
         accepted = cert.verdict in (

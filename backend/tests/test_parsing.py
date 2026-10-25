@@ -68,3 +68,15 @@ def test_parse_failure_message_quotes_the_start_of_the_reply() -> None:
     client = make_client(["Sure! Here are my thoughts...", "still no blocks here"])
     with _pytest.raises(ModelOutputError, match="reply began: 'still no blocks"):
         client.complete_parsed(system="s", user="u", parser=parse_verification_reply)
+
+
+def test_review_reply_parsing() -> None:
+    from app.agents.parsing import parse_review_reply
+
+    ok = parse_review_reply("VERDICT: ACCEPT\n")
+    assert ok.accept and ok.defects == []
+    bad = parse_review_reply("verdict: reject\nDEFECT: no validation\nDEFECT: wrong slice")
+    assert not bad.accept and bad.defects == ["no validation", "wrong slice"]
+    assert parse_review_reply("VERDICT: REJECT").defects  # never an empty rejection
+    with pytest.raises(ValueError):
+        parse_review_reply("looks fine to me")

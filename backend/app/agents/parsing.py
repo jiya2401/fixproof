@@ -6,7 +6,13 @@ live Nemotron reply). These formats put code in fenced blocks and parse them det
 
 import re
 
-from app.agents.models import AdversarialTest, FileEdit, PatchProposal, VerificationPlan
+from app.agents.models import (
+    AdversarialTest,
+    FileEdit,
+    PatchProposal,
+    ReviewResult,
+    VerificationPlan,
+)
 
 _DIFF_BLOCK = re.compile(r"```(?:diff|patch)?[ \t]*\n(.*?)\n```", re.DOTALL)
 _EDIT_BLOCK = re.compile(
@@ -70,3 +76,14 @@ def parse_verification_reply(raw: str) -> VerificationPlan:
     invariants = re.findall(r"^INVARIANT:[ \t]*(.+)$", raw, re.MULTILINE)
     risks = re.findall(r"^RISK:[ \t]*(.+)$", raw, re.MULTILINE)
     return VerificationPlan(tests=tests, invariants=invariants, risk_areas=risks)
+
+
+def parse_review_reply(raw: str) -> ReviewResult:
+    match = re.search(r"^VERDICT:[ \t]*(ACCEPT|REJECT)", raw, re.MULTILINE | re.IGNORECASE)
+    if not match:
+        raise ValueError("no 'VERDICT: ACCEPT|REJECT' line found")
+    accept = match.group(1).upper() == "ACCEPT"
+    defects = re.findall(r"^DEFECT:[ \t]*(.+)$", raw, re.MULTILINE | re.IGNORECASE)
+    if not accept and not defects:
+        defects = ["reviewer rejected the patch without naming a defect"]
+    return ReviewResult(accept=accept, defects=defects)

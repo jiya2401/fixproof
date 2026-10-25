@@ -47,3 +47,8 @@ class VerificationPlan(BaseModel):
     tests: list[AdversarialTest] = Field(default_factory=list)
     invariants: list[str] = Field(default_factory=list)
     risk_areas: list[str] = Field(default_factory=list)
+
+
+class ReviewResult(BaseModel):
+    accept: bool
+    defects: list[str] = Field(default_factory=list)

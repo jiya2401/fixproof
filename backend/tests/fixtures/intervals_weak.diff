@@ -1,0 +1,11 @@
+--- a/merge_intervals.py
++++ b/merge_intervals.py
+@@ -7,7 +7,7 @@
+     - Returns a new sorted list of ``(start, end)`` tuples; the input is not modified.
+     """
+     merged = []
+-    for start, end in intervals:
++    for start, end in sorted(intervals):
+         if merged and start < merged[-1][1]:
+             merged[-1] = (merged[-1][0], end)
+         else:

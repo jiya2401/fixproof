@@ -307,3 +307,66 @@ def test_feedback_accumulates_counterexamples_across_attempts(auth_src) -> None:
     third = fixer.calls[2] or ""
     assert "All counterexamples found so far" in third and "unknown_token_type" in third
     assert cert.verdict == VerificationVerdict.VERIFIED_WITH_CONDITIONS
+
+
+# --- self-review baseline (LLM reviews LLM; nothing executed) ---------------------------------
+
+
+class ScriptedReviewer:
+    def __init__(self, results) -> None:
+        self.results, self.calls = results, 0
+
+    def review(self, **_kwargs):
+        result = self.results[min(self.calls, len(self.results) - 1)]
+        self.calls += 1
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+
+def run_review(src, fixer, reviewer, targets, max_iterations=3):
+    pipeline = RepairPipeline(
+        sandbox=LocalSandbox(), fixer=fixer, planner=None, reviewer=reviewer,
+        max_iterations=max_iterations,
+    )  # fmt: skip
+    return pipeline.run(source=src, issue=AUTH_ISSUE, repro_targets=targets)
+
+
+def test_self_review_can_reject_and_feed_back_defects(auth_src) -> None:
+    from app.agents.models import ReviewResult
+
+    fixer = ScriptedFixer([fixture_text("auth_weak.diff"), fixture_text("auth_correct.diff")])
+    reviewer = ScriptedReviewer(
+        [
+            ReviewResult(accept=False, defects=["accepts unknown token types"]),
+            ReviewResult(accept=True),
+        ]
+    )
+    cert = run_review(auth_src, fixer, reviewer, ["test_auth.py"])
+    assert len(cert.iterations) == 2 and reviewer.calls == 2
+    assert "accepts unknown token types" in (fixer.calls[1] or "")
+    assert check(cert, "self_review", 0).outcome == CheckOutcome.FAILED
+    assert check(cert, "self_review", 1).outcome == CheckOutcome.PASSED
+
+
+def test_self_review_that_accepts_a_weak_patch_is_not_evidence(auth_src) -> None:
+    from app.agents.models import ReviewResult
+
+    cert = run_review(
+        auth_src, ScriptedFixer([fixture_text("auth_weak.diff")]),
+        ScriptedReviewer([ReviewResult(accept=True)]), ["test_auth.py"],
+    )  # fmt: skip
+    assert len(cert.iterations) == 1  # the loop stopped: reviewer said fine
+    # ...yet the real counterexample exists: the weak patch fails the executed contract test.
+    assert (
+        cert.verdict == VerificationVerdict.INSUFFICIENT_EVIDENCE
+    )  # no executed adversarial evidence
+
+
+def test_review_failure_is_treated_as_no_objection(auth_src) -> None:
+    cert = run_review(
+        auth_src, ScriptedFixer([fixture_text("auth_correct.diff")]),
+        ScriptedReviewer([RuntimeError("unparseable")]), ["test_auth.py"],
+    )  # fmt: skip
+    review = check(cert, "self_review")
+    assert review.outcome == CheckOutcome.ERROR and len(cert.iterations) == 1
