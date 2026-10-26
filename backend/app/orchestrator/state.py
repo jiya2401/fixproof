@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-from app.certificate import FixCertificate
+from app.certificate import FixCertificate, TimelineEvent
 from app.verification.results import VerificationVerdict
 
 
@@ -39,7 +39,7 @@ class EvidenceItem(BaseModel):
 
 class InvestigationState(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
-    repo_url: str
+    repo_url: str = ""
     issue: str
     stage: InvestigationStage = InvestigationStage.CREATED
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -54,6 +54,9 @@ class InvestigationState(BaseModel):
     verdict: VerificationVerdict | None = None
     limitations: list[str] = Field(default_factory=list)
     example_case: str | None = None
+    project_id: str | None = None
+    project_name: str | None = None
+    events: list[TimelineEvent] = Field(default_factory=list)
     repro_targets: list[str] = Field(default_factory=list)
     certificate: FixCertificate | None = None
     error: str | None = None

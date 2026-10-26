@@ -1,0 +1,7 @@
+# Third-party packages available to projects you test with FixProof.
+# The sandbox has NO network at run time, so anything your project imports must be listed here
+# and the image rebuilt:   docker build -t fixproof-sandbox backend/sandbox-image
+requests
+pyyaml
+python-dateutil
+attrs

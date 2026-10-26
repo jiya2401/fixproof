@@ -46,7 +46,7 @@ from app.verification.results import (
 )
 from app.verification.verdict import MANDATORY_CHECKS, evaluate_policy
 
-MAX_CODE_CHARS = 30_000
+MAX_CODE_CHARS = 40_000
 ADV_DIR = "fixproof_adv"
 
 
@@ -76,17 +76,42 @@ class Investigator(Protocol):
     def plan(self, *, issue: str, evidence: str, relevant_code: str) -> InvestigationPlan: ...
 
 
-def collect_code(workspace: Path, limit: int = MAX_CODE_CHARS) -> str:
-    parts: list[str] = []
-    used = 0
+_TRACE_PATH = re.compile(r"([A-Za-z0-9_./\\-]+\.py):\d+")
+
+
+def collect_code(
+    workspace: Path,
+    limit: int = MAX_CODE_CHARS,
+    focus_text: str = "",
+    test_files: list[str] | None = None,
+) -> str:
+    """Repository context for the model. Failing tests come first (read-only context), then files
+    named in the failure traceback, then everything else, until `limit` characters."""
+    mentioned = {m.replace("\\", "/").lstrip("/") for m in _TRACE_PATH.findall(focus_text)}
+
+    def relevance(rel: str) -> int:
+        return 0 if any(rel.endswith(m.removeprefix("work/")) for m in mentioned) else 1
+
+    chunks: list[tuple[int, str, str]] = []
+    for name in test_files or []:
+        path = workspace / name
+        if path.is_file():
+            body = path.read_text(encoding="utf-8", errors="replace")
+            chunks.append(
+                (-1, name, f"### {name}  (FAILING TEST - read-only context, do not edit)\n{body}\n")
+            )
     for path in sorted(workspace.rglob("*.py")):
         rel = path.relative_to(workspace).as_posix()
         if rel.startswith((".", ADV_DIR)) or "/." in rel or is_protected_path(rel):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
-        chunk = f"### {rel}\n{text}\n"
+        chunks.append((relevance(rel), rel, f"### {rel}\n{text}\n"))
+    chunks.sort(key=lambda c: (c[0], c[1]))
+    parts: list[str] = []
+    used = 0
+    for _rank, _rel, chunk in chunks:
         if used + len(chunk) > limit:
-            break
+            continue
         parts.append(chunk)
         used += len(chunk)
     return "\n".join(parts)
@@ -137,6 +162,8 @@ class RepairPipeline:
         self.reviewer = reviewer  # comparison baseline only (LLM reviews LLM, nothing executed)
         self.max_iterations = max(1, max_iterations)
         self._spec_corpus = ""
+        self._test_files: list[str] = []
+        self._focus_text = ""
         self._adv_suite: dict[str, AdversarialTest] = {}
         self.model_info = model_info
         self.on_event = on_event
@@ -176,7 +203,9 @@ class RepairPipeline:
                 self.sandbox, ws0, name="reproduction_red", targets=repro_targets,
                 role=CheckRole.PRECONDITION, expect_failure=True,
             )  # fmt: skip
-            code0 = collect_code(ws0)
+            self._test_files = [t.split("::", 1)[0] for t in repro_targets]
+            self._focus_text = red.output_excerpt
+            code0 = self._code(ws0)
         finally:
             self.sandbox.destroy(ws0)
         event("reproducing", f"reproduction_red: {red.outcome.value} - {red.summary}")
@@ -350,6 +379,9 @@ class RepairPipeline:
         finally:
             self.sandbox.destroy(ws)
 
+    def _code(self, workspace: Path) -> str:
+        return collect_code(workspace, focus_text=self._focus_text, test_files=self._test_files)
+
     def _review(
         self, ws: Path, proposal: PatchProposal, issue: str, event: Callable[[str, str], None]
     ) -> CheckResult:
@@ -358,7 +390,7 @@ class RepairPipeline:
         event("reviewing", "asking Nemotron to review its own patch (baseline, nothing executed)")
         try:
             result = self.reviewer.review(
-                issue=issue, patch_diff=proposal.diff, relevant_code=collect_code(ws)
+                issue=issue, patch_diff=proposal.diff, relevant_code=self._code(ws)
             )
         except Exception as exc:  # noqa: BLE001
             return CheckResult(
@@ -393,7 +425,7 @@ class RepairPipeline:
         try:
             plan = self.planner.plan(
                 issue=issue, patch_diff=proposal.diff, reproduction_evidence=red.output_excerpt,
-                relevant_code=collect_code(ws),
+                relevant_code=self._code(ws),
                 prior_counterexamples=[f"existing adversarial test: {name}" for name in adv_suite],
             )  # fmt: skip
         except Exception as exc:  # noqa: BLE001

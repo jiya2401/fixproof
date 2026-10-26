@@ -60,6 +60,15 @@ Legend: ✅ implemented and tested · 🟡 implemented, not yet exercised live �
 In local-process sandbox mode every verdict is capped at `VERIFIED_WITH_CONDITIONS`.
 No benchmark numbers are published here because none have been measured.
 
+## Test your own project
+
+In the UI choose **Upload your project** (zip), **GitHub URL**, or **Local folder** (enable it with
+`FIXPROOF_LOCAL_PATH_ROOTS`). FixProof runs your test suite in the sandbox, lists the failing tests, and you pick
+the one to repair and describe the expected behavior. The sandbox is **offline**: your project may use the
+standard library plus the packages in `backend/sandbox-image/extra-requirements.txt` (rebuild the image after
+editing it). Missing imports are detected and reported. Projects with a `src/` layout are supported.
+Attack tests must quote your issue, docstrings or README, so write the expected behavior down.
+
 ## What the model does vs. what tools do
 
 | Step | Who |

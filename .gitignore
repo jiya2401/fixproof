@@ -46,3 +46,5 @@ frontend/*.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
 evals/results/
+.fixproof_projects/
+backend/.fixproof_projects/

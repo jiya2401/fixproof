@@ -42,7 +42,8 @@ class DockerSandbox(SandboxRunner):
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
             "--pids-limit", "256", "--memory", "1g", "--cpus", "1",
             "--user", "65534:65534",
-            "-e", "PYTHONDONTWRITEBYTECODE=1", "-e", "HOME=/tmp", "-e", "PYTHONPATH=/work",
+            "-e", "PYTHONDONTWRITEBYTECODE=1", "-e", "HOME=/tmp",
+            "-e", "PYTHONPATH=/work:/work/src",
             "-v", f"{workspace}:/work:rw", "-w", "/work",
             self.image, *command,
         ]  # fmt: skip

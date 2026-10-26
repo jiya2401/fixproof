@@ -86,7 +86,7 @@ class LocalSandbox(SandboxRunner):
             "LANG": "C.UTF-8",
             "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONHASHSEED": "0",
-            "PYTHONPATH": str(workspace),
+            "PYTHONPATH": os.pathsep.join([str(workspace), str(workspace / "src")]),
         }
 
     def run(self, workspace: Path, command: list[str], timeout_seconds: int = 120) -> CommandResult:

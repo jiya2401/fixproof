@@ -39,6 +39,10 @@ def build_spec_corpus(issue: str, source: Path) -> str:
                 doc = ast.get_docstring(node)
                 if doc:
                     parts.append(doc)
+    for pattern in ("README*", "docs/**/*.md", "docs/**/*.rst", "docs/**/*.txt"):
+        for doc in sorted(source.glob(pattern))[:20]:
+            if doc.is_file():
+                parts.append(doc.read_text(encoding="utf-8", errors="replace")[:100_000])
     return normalize("\n".join(parts))
 
 

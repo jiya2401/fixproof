@@ -370,3 +370,21 @@ def test_review_failure_is_treated_as_no_objection(auth_src) -> None:
     )  # fmt: skip
     review = check(cert, "self_review")
     assert review.outcome == CheckOutcome.ERROR and len(cert.iterations) == 1
+
+
+# --- code context given to the model ---------------------------------------------------------
+
+
+def test_collect_code_puts_failing_test_first_and_traceback_files_before_others(tmp_path) -> None:
+    from app.pipeline.runner import collect_code
+
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_x.py").write_text("def test_x():\n    assert f() == 1\n")
+    (tmp_path / "a_unrelated.py").write_text("A = 1\n")
+    (tmp_path / "z_buggy.py").write_text("def f():\n    return 2\n")
+    text = collect_code(
+        tmp_path, focus_text="/work/z_buggy.py:2: AssertionError", test_files=["tests/test_x.py"]
+    )
+    order = [text.index(n) for n in ("tests/test_x.py", "z_buggy.py", "a_unrelated.py")]
+    assert order == sorted(order)
+    assert "read-only context, do not edit" in text
