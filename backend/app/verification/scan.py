@@ -29,7 +29,8 @@ class ScanResult(BaseModel):
     skipped: int = 0
     failing_tests: list[FailingTest] = Field(default_factory=list)
     collection_errors: list[FailingTest] = Field(default_factory=list)
-    missing_modules: list[str] = Field(default_factory=list)
+    missing_modules: list[str] = Field(default_factory=list)  # third-party, not in the image
+    local_modules_unresolved: list[str] = Field(default_factory=list)  # project's own modules
     hint: str = ""
     output_excerpt: str = ""
 
@@ -60,6 +61,12 @@ def validate_repro_targets(source: Path, targets: list[str]) -> list[str]:
     return clean
 
 
+def _is_project_module(source: Path, name: str) -> bool:
+    if any(True for _ in source.rglob(f"{name}.py")):
+        return True
+    return any(p.is_dir() for p in source.rglob(name))
+
+
 def scan_project(sandbox: SandboxRunner, source: Path, timeout_seconds: int = 180) -> ScanResult:
     workspace = sandbox.prepare_workspace(source)
     try:
@@ -82,12 +89,15 @@ def scan_project(sandbox: SandboxRunner, source: Path, timeout_seconds: int = 18
         item = FailingTest(node_id=node.replace("\\", "/"), message=message[:300])
         # FAILED = a test ran and failed; ERROR = collection/import/fixture problem
         (failing if kind == "FAILED" else collection).append(item)
-    missing = sorted({m.split(".")[0] for m in _MISSING_MODULE.findall(combined)})
+    wanted = sorted({m.split(".")[0] for m in _MISSING_MODULE.findall(combined)})
+    local = [m for m in wanted if _is_project_module(source, m)]
+    missing = [m for m in wanted if m not in local]
     scan = ScanResult(
         exit_code=result.exit_code, timed_out=result.timed_out,
         duration_seconds=round(result.duration_seconds, 2), tests=int(stats["tests"]),
         failed=int(stats["failures"]), errors=int(stats["errors"]), skipped=int(stats["skipped"]),
         failing_tests=failing, collection_errors=collection, missing_modules=missing,
+        local_modules_unresolved=local,
         output_excerpt=combined.strip()[-3000:],
     )  # fmt: skip
 
@@ -96,11 +106,21 @@ def scan_project(sandbox: SandboxRunner, source: Path, timeout_seconds: int = 18
     elif result.exit_code in (125, 126, 127) and not scan.tests:
         first = next((ln for ln in result.stderr.splitlines() if ln.strip()), "no stderr")
         scan.hint = f"The sandbox could not start (exit {result.exit_code}): {first[:200]}"
-    elif missing:
-        scan.hint = (
-            f"Tests import {', '.join(missing)}, which is not installed in the offline sandbox "
-            "image. Add it to backend/sandbox-image/extra-requirements.txt and rebuild the image."
-        )
+    elif missing or local:
+        parts = []
+        if missing:
+            parts.append(
+                f"Tests import {', '.join(missing)}, which is not installed in the offline "
+                "sandbox image. Add it to backend/sandbox-image/extra-requirements.txt and "
+                "rebuild the image."
+            )
+        if local:
+            parts.append(
+                f"Some tests import project modules ({', '.join(local)}) that are not importable "
+                "from the project root. They likely belong to a sub-project with its own root; "
+                "pick a test that runs on its own, or use that sub-folder as the project."
+            )
+        scan.hint = " ".join(parts)
     elif result.exit_code == 5:
         scan.hint = "pytest collected no tests. FixProof needs a pytest test that fails."
     elif result.exit_code == 0:

@@ -388,3 +388,99 @@ def test_collect_code_puts_failing_test_first_and_traceback_files_before_others(
     order = [text.index(n) for n in ("tests/test_x.py", "z_buggy.py", "a_unrelated.py")]
     assert order == sorted(order)
     assert "read-only context, do not edit" in text
+
+
+# --- real projects: pre-existing failures must not be blamed on the patch ---------------------
+
+CALC = (
+    "def add(a, b):\n"
+    '    """Return the sum of a and b."""\n'
+    "    return a - b\n\n\n"
+    "def mul(a, b):\n"
+    "    return a * b\n"
+)
+CALC_TESTS = {
+    "calc.py": CALC,
+    "test_calc.py": (
+        "from calc import add, mul\n\n"
+        "def test_add():\n    assert add(2, 3) == 5\n\n"
+        "def test_mul():\n    assert mul(2, 3) == 6\n"
+    ),
+    "test_unrelated.py": "def test_unrelated():\n    assert False\n",  # fails before and after
+    "test_broken_import.py": "import zzz_missing_pkg_for_test\n\ndef test_z():\n    pass\n",
+}
+CALC_SPEC_TEST = AdversarialTest(
+    name="add_sums",
+    rationale="documented contract",
+    spec_quote="Return the sum of a and b",
+    code=(
+        "from calc import add\n\n"
+        "def test_add_sums():\n    assert add(-1, 1) == 0\n    assert add(2, 3) == 5\n"
+    ),
+)
+
+
+def calc_project(tmp_path):
+    for name, content in CALC_TESTS.items():
+        (tmp_path / name).write_text(content)
+    return tmp_path
+
+
+def calc_diff(new_calc: str) -> str:
+    import difflib
+
+    return "".join(
+        difflib.unified_diff(
+            CALC.splitlines(True),
+            new_calc.splitlines(True),
+            fromfile="a/calc.py",
+            tofile="b/calc.py",
+        )
+    )
+
+
+def run_calc(src, diff, planner=None):
+    pipeline = RepairPipeline(
+        sandbox=LocalSandbox(), fixer=ScriptedFixer([diff]),
+        planner=planner or ScriptedPlanner([CALC_SPEC_TEST]), max_iterations=1,
+    )  # fmt: skip
+    return pipeline.run(
+        source=src,
+        issue="add() subtracts instead of adding",
+        repro_targets=["test_calc.py::test_add"],
+    )
+
+
+def test_preexisting_failures_are_excluded_but_disclosed(tmp_path) -> None:
+    cert = run_calc(calc_project(tmp_path), calc_diff(CALC.replace("a - b", "a + b")))
+    regression = check(cert, "regression")
+    assert regression.outcome == CheckOutcome.PASSED
+    assert "pre-existing failure(s) unchanged" in regression.summary
+    assert any("already failing before the patch" in lim for lim in cert.limitations)
+    assert cert.verdict == VerificationVerdict.VERIFIED_WITH_CONDITIONS
+
+
+def test_a_patch_that_breaks_another_passing_test_is_a_regression(tmp_path) -> None:
+    broken = CALC.replace("a - b", "a + b").replace("return a * b", "return a + b")
+    cert = run_calc(calc_project(tmp_path), calc_diff(broken))
+    regression = check(cert, "regression")
+    assert regression.outcome == CheckOutcome.FAILED
+    assert any("test_calc.py::test_mul" in c for c in regression.counterexamples)
+    assert cert.verdict == VerificationVerdict.NOT_VERIFIED
+
+
+def test_a_patch_that_makes_tests_vanish_is_a_regression(tmp_path) -> None:
+    vanishing = "import zzz_missing_pkg_for_test\n" + CALC.replace("a - b", "a + b")
+    cert = run_calc(calc_project(tmp_path), calc_diff(vanishing))
+    assert check(cert, "regression").outcome == CheckOutcome.FAILED
+    assert cert.verdict == VerificationVerdict.NOT_VERIFIED
+
+
+def test_no_usable_baseline_means_insufficient_evidence(tmp_path, monkeypatch) -> None:
+    from app.verification.suite import SuiteRun
+
+    monkeypatch.setattr("app.pipeline.runner.run_suite", lambda *a, **k: SuiteRun(timed_out=True))
+    cert = run_calc(calc_project(tmp_path), calc_diff(CALC.replace("a - b", "a + b")))
+    reg = check(cert, "regression")
+    assert reg.outcome == CheckOutcome.ERROR and "baseline" in reg.summary
+    assert cert.verdict == VerificationVerdict.INSUFFICIENT_EVIDENCE

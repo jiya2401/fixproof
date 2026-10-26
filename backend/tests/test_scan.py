@@ -50,3 +50,18 @@ def test_scan_supports_src_layout(tmp_path) -> None:
     scan = scan_project(LocalSandbox(), tmp_path)
     assert scan.missing_modules == [] and scan.collection_errors == []
     assert [t.node_id for t in scan.failing_tests] == ["tests/test_mod.py::test_double"]
+
+
+def test_scan_separates_project_modules_from_missing_packages(tmp_path) -> None:
+    write(
+        tmp_path,
+        {
+            "sub/helpers.py": "def f():\n    return 1\n",
+            "tests/test_x.py": "from helpers import f\n\ndef test_x():\n    assert f() == 1\n",
+            "tests/test_y.py": "import zzz_not_real\n\ndef test_y():\n    pass\n",
+        },
+    )
+    scan = scan_project(LocalSandbox(), tmp_path)
+    assert scan.local_modules_unresolved == ["helpers"]
+    assert scan.missing_modules == ["zzz_not_real"]
+    assert "extra-requirements.txt" in scan.hint and "sub-project" in scan.hint

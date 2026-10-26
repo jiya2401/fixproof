@@ -34,7 +34,12 @@ still accepted as a fallback.
 - `patch_applies_in_scope`: diff parses, applies with `git apply`, stays inside the repo, and
   does **not** modify tests/conftest/test config (otherwise a model could "fix" a bug by editing the test).
 - `reproduction_green`: the same reproduction passes after patching.
-- `regression`: the repository's full pytest suite passes after patching.
+- `regression`: judged against a **pre-patch baseline**. The full suite runs once before the patch and once
+  after; the check fails if any test that passed before no longer passes (including tests that stop being
+  collected, e.g. through a new import error). Tests that were already failing, and collection errors, are not
+  blamed on the patch, but their number is disclosed as a limitation (verdict at most `VERIFIED_WITH_CONDITIONS`).
+  If the baseline or the post-patch run cannot complete (timeout, crash), the check is `error` and the verdict
+  is `INSUFFICIENT_EVIDENCE`.
 - `adversarial`: model-authored **spec-grounded** pytest tests, executed in the sandbox, find no counterexample. At least one grounded test must have executed.
 - `adversarial_ungrounded` (optional): tests whose spec quote was missing or not found. Their failures are reported as a condition for human review, never as a veto, and are never fed back to the fixer.
 

@@ -44,6 +44,7 @@ from app.verification.results import (
     CheckRole,
     VerificationReport,
 )
+from app.verification.suite import SuiteRun, compare, matches_target, run_suite
 from app.verification.verdict import MANDATORY_CHECKS, evaluate_policy
 
 MAX_CODE_CHARS = 40_000
@@ -162,6 +163,7 @@ class RepairPipeline:
         self.reviewer = reviewer  # comparison baseline only (LLM reviews LLM, nothing executed)
         self.max_iterations = max(1, max_iterations)
         self._spec_corpus = ""
+        self._baseline: SuiteRun | None = None
         self._test_files: list[str] = []
         self._focus_text = ""
         self._adv_suite: dict[str, AdversarialTest] = {}
@@ -203,6 +205,8 @@ class RepairPipeline:
                 self.sandbox, ws0, name="reproduction_red", targets=repro_targets,
                 role=CheckRole.PRECONDITION, expect_failure=True,
             )  # fmt: skip
+            if red.outcome == CheckOutcome.PASSED:
+                self._baseline = run_suite(self.sandbox, ws0)
             self._test_files = [t.split("::", 1)[0] for t in repro_targets]
             self._focus_text = red.output_excerpt
             code0 = self._code(ws0)
@@ -213,6 +217,18 @@ class RepairPipeline:
         if red.outcome != CheckOutcome.PASSED:
             cert.limitations.append("original failure was not reproduced; no model calls made")
             return self._finish(cert, [red])
+
+        if self._baseline is not None and self._baseline.usable:
+            other = [
+                n for n, o in self._baseline.outcomes.items()
+                if o in ("failed", "error") and not matches_target(n, repro_targets)
+            ]  # fmt: skip
+            if other:
+                cert.limitations.append(
+                    f"{len(other)} other test(s) or collection error(s) were already failing "
+                    "before the patch and are excluded from the regression check, which compares "
+                    "against that pre-patch baseline."
+                )
 
         # 2. Hypotheses (model). Recorded, but not experimentally tested in this release.
         if self.investigator is not None:
@@ -362,7 +378,7 @@ class RepairPipeline:
                 self.sandbox, ws, name="reproduction_green", targets=repro_targets
             )
             event("verifying", f"reproduction_green: {green.outcome.value} - {green.summary}")
-            regression = run_pytest_check(self.sandbox, ws, name="regression")
+            regression = self._regression(ws)
             event("verifying", f"regression: {regression.outcome.value} - {regression.summary}")
 
             if green.outcome != CheckOutcome.PASSED or regression.outcome != CheckOutcome.PASSED:
@@ -378,6 +394,41 @@ class RepairPipeline:
             return [scope, green, regression, *adversarial]
         finally:
             self.sandbox.destroy(ws)
+
+    def _regression(self, ws: Path) -> CheckResult:
+        """Full suite after the patch, judged against the pre-patch baseline."""
+        baseline = self._baseline
+        after = run_suite(self.sandbox, ws)
+        check = CheckResult(
+            name="regression", command=after.command, exit_code=after.exit_code,
+            duration_seconds=after.duration_seconds, tests_executed=after.executed,
+            stdout_sha256=after.stdout_sha256, output_excerpt=after.excerpt,
+        )  # fmt: skip
+        if baseline is None or not baseline.usable:
+            check.outcome = CheckOutcome.ERROR
+            check.summary = "no usable pre-patch baseline, so regressions cannot be judged"
+        elif not after.usable:
+            check.outcome = CheckOutcome.ERROR
+            check.summary = (
+                "post-patch suite run did not complete "
+                f"(exit {after.exit_code}{', timed out' if after.timed_out else ''})"
+            )
+        else:
+            diff = compare(baseline, after)
+            if diff.regressions:
+                check.outcome = CheckOutcome.FAILED
+                check.summary = f"{len(diff.regressions)} previously passing test(s) no longer pass"
+                check.counterexamples = [
+                    f"previously passing test no longer passes: {n}" for n in diff.regressions[:20]
+                ]
+            else:
+                check.outcome = CheckOutcome.PASSED
+                check.summary = (
+                    f"no previously passing test broke ({baseline.count('passed')} checked; "
+                    f"{len(diff.still_failing)} pre-existing failure(s) unchanged; "
+                    f"{len(diff.fixed)} newly passing)"
+                )
+        return check
 
     def _code(self, workspace: Path) -> str:
         return collect_code(workspace, focus_text=self._focus_text, test_files=self._test_files)
