@@ -46,6 +46,7 @@ Legend: ✅ implemented and tested · 🟡 implemented, not yet exercised live �
 | Re-run reproduction **and** full regression suite after every patch | ✅ |
 | Model-authored adversarial pytest tests **executed** in the sandbox | ✅ (with scripted model) / 🟡 (live Nemotron) |
 | Spec-grounded adversarial tests (quote verified mechanically; ungrounded failures = condition, not veto) | ✅ |
+| Contradictory attack tests detected across attempts; least-bad attempt reported; human dispute + no-model re-verify | ✅ |
 | Counterexample → fixer feedback, bounded retries, repeated-patch detection | ✅ |
 | Verdict policy v1, sealed tamper-evident Fix Certificate, certificate UI | ✅ |
 | Process sandbox: scrubbed env, rlimits, timeout, network namespace | ✅ tested; **no filesystem isolation** |

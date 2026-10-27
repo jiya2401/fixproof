@@ -144,7 +144,10 @@ export default function App() {
             {step === 'run' && investigationId && (
               <RunMonitor investigationId={investigationId} onDone={onDone} onBack={() => setStep('scan')} />
             )}
-            {step === 'result' && cert && <CertificateView cert={cert} onReset={reset} />}
+            {step === 'result' && cert && (
+              <CertificateView cert={cert} onReset={reset} investigationId={investigationId ?? undefined}
+                onReverify={(newId) => { setCert(null); setInvestigationId(newId); setStep('run') }} />
+            )}
           </>
         )}
 

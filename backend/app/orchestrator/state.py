@@ -55,6 +55,7 @@ class InvestigationState(BaseModel):
     limitations: list[str] = Field(default_factory=list)
     example_case: str | None = None
     project_id: str | None = None
+    parent_id: str | None = None  # set when this run re-verifies another investigation
     project_name: str | None = None
     events: list[TimelineEvent] = Field(default_factory=list)
     repro_targets: list[str] = Field(default_factory=list)

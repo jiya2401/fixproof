@@ -39,7 +39,10 @@ def run_pytest(
     timeout_seconds: int = 180,
     junit_name: str = ".fixproof_junit.xml",
 ) -> CommandResult:
-    command = ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider", f"--junitxml={junit_name}"]
+    command = [
+        "python", "-m", "pytest", "-q", "-p", "no:cacheprovider",
+        "-o", "junit_family=xunit1", f"--junitxml={junit_name}",
+    ]  # fmt: skip
     if targets:
         command.extend(targets)
     return sandbox.run(workspace, command, timeout_seconds=timeout_seconds)

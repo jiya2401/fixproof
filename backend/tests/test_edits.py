@@ -115,3 +115,17 @@ def test_failed_edit_feedback_is_actionable_and_second_attempt_is_verified(pagin
     assert len(cert.iterations) == 2
     assert cert.verdict == VerificationVerdict.VERIFIED_WITH_CONDITIONS
     assert cert.final_patch and cert.final_patch.startswith("--- a/paginate.py")
+
+
+def test_search_mismatch_names_the_exact_differing_line(paginate_src) -> None:
+    # first line matches the file, the second differs only by indentation
+    bad = FileEdit(
+        path="paginate.py",
+        search=(
+            'def paginate(items: list, page: int, per_page: int) -> list:\n  """Return the items.\n'
+        ),
+        replace="x\n",
+    )
+    _, errors = build_diff_from_edits(paginate_src, [bad])
+    assert "Line 2 of your SEARCH differs from the file" in errors[0]
+    assert "Return the items on a 1-indexed" in errors[0]

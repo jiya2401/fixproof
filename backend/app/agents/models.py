@@ -35,6 +35,9 @@ class AdversarialTest(BaseModel):
     spec_quote: str = ""  # verbatim sentence from the issue/docstrings this test enforces
     grounded: bool = False  # set by the pipeline, never by the model
     grounding_note: str = ""
+    key: str = ""  # stable id used for the generated test file; set by the pipeline
+    disputed: bool = False  # excluded by a human reviewer (never by the model)
+    dispute_reason: str = ""
 
 
 class VerificationPlan(BaseModel):

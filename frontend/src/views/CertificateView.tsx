@@ -5,6 +5,7 @@ import {
   type Tone,
 } from '../ui'
 import DiffView from './DiffView'
+import ReviewPanel from './ReviewPanel'
 
 const VERDICTS: Record<Verdict, { label: string; line: string; tone: string; icon: 'ok' | 'warn' | 'bad' | 'none' }> = {
   verified: {
@@ -70,7 +71,14 @@ function Chip({ check }: { check: Check }) {
   )
 }
 
-export default function CertificateView({ cert, onReset }: { cert: Certificate; onReset: () => void }) {
+export default function CertificateView({
+  cert, onReset, investigationId, onReverify,
+}: {
+  cert: Certificate
+  onReset: () => void
+  investigationId?: string
+  onReverify?: (newId: string) => void
+}) {
   const [copied, setCopied] = useState<string | null>(null)
   const v = VERDICTS[cert.verdict]
   const copy = async (what: string, text: string) => {
@@ -122,6 +130,17 @@ export default function CertificateView({ cert, onReset }: { cert: Certificate; 
         </ul>
       </section>
 
+      {cert.derived_from && (
+        <div className="flex gap-3 rounded-2xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100">
+          <Alert className="mt-0.5 h-4 w-4 shrink-0" />
+          <p>
+            <b>Human-reviewed re-verification.</b> Attempt {cert.reverified_attempt} was re-checked after a
+            reviewer excluded {cert.adversarial_tests.filter((t) => t.disputed).length} attack test(s). No model
+            calls were made; the exclusion and reason are listed under limitations.
+          </p>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         <Stat label="Attempts" value={`${cert.iterations.length}/${cert.max_iterations}`} sub={rejected ? `${rejected} rejected by evidence` : 'first patch held'} />
         <Stat label="Tests executed" value={testsExecuted} sub="across final checks" />
@@ -151,7 +170,7 @@ export default function CertificateView({ cert, onReset }: { cert: Certificate; 
                 status === 'accepted' ? 'border-emerald-400/30 bg-emerald-400/5'
                 : status === 'rejected' ? 'border-red-400/25 bg-red-400/5' : 'border-white/10 bg-black/20'}`}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-medium text-white">Attempt {it.index} <span className="font-normal text-zinc-400">· {it.summary || it.note || 'no patch'}</span></p>
+                  <p className="text-sm font-medium text-white">Attempt {it.index}{cert.selected_attempt === it.index ? ' (reported)' : ''} <span className="font-normal text-zinc-400">· {it.summary || it.note || 'no patch'}</span></p>
                   <Pill tone={status === 'accepted' ? 'green' : status === 'rejected' ? 'red' : 'gray'}>
                     {status === 'accepted' ? 'survived every check' : status === 'rejected' ? 'rejected by evidence' : 'incomplete'}
                   </Pill>
@@ -166,6 +185,9 @@ export default function CertificateView({ cert, onReset }: { cert: Certificate; 
                       return (
                         <li key={c} className="rounded-lg border border-red-400/20 bg-black/30 p-3">
                           <p className="mono break-words text-xs text-red-200">{message}</p>
+                          {cert.contested.some((k) => message.includes(`test_adv_${k}`)) && (
+                            <p className="mt-2"><Pill tone="amber">contradicts other attack tests</Pill></p>
+                          )}
                           {spec && <p className="mt-2 border-l-2 border-sky-400/50 pl-3 text-xs text-sky-200"><span className="text-sky-400">Spec quoted:</span> “{spec}”</p>}
                         </li>
                       )
@@ -185,6 +207,10 @@ export default function CertificateView({ cert, onReset }: { cert: Certificate; 
           {cert.iterations.length === 0 && <li className="text-sm text-zinc-500">No patch was attempted: {cert.limitations[0] ?? 'see the limitations below'}.</li>}
         </ol>
       </Card>
+
+      {investigationId && onReverify && (
+        <ReviewPanel cert={cert} investigationId={investigationId} onStarted={onReverify} />
+      )}
 
       {cert.final_patch && (
         <Card className="p-6">
@@ -228,7 +254,7 @@ export default function CertificateView({ cert, onReset }: { cert: Certificate; 
             {cert.adversarial_tests.map((t) => (
               <details key={t.name} className="rounded-xl border border-white/10 bg-black/20 p-3">
                 <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-sm">
-                  <Pill tone={t.grounded ? 'green' : 'amber'}>{t.grounded ? 'spec-grounded' : 'unvalidated'}</Pill>
+                  <Pill tone={t.disputed ? 'gray' : t.grounded ? 'green' : 'amber'}>{t.disputed ? 'excluded by reviewer' : t.grounded ? 'spec-grounded' : 'unvalidated'}</Pill>
                   <span className="mono text-zinc-200">{t.name}</span>
                   <span className="text-xs text-zinc-500">{t.rationale}</span>
                 </summary>

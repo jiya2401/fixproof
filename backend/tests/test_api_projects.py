@@ -138,3 +138,117 @@ def test_about_lists_every_validated_case() -> None:
     about = client.get("/api/v1/about").json()
     assert len(about["example_cases"]) == 7 and about["project_sources"]["zip"] is True
     assert set(about["example_issues"]) == set(about["example_cases"])
+
+
+# --- reverify endpoint -------------------------------------------------------------------------
+
+
+@pytest.fixture
+def contested_investigation(monkeypatch):
+    from app.agents.models import VerificationPlan
+    from tests.test_contest import (
+        CORRECT_BODY,
+        CORRUPTED_BODY,
+        PARTIAL_LAST,
+        PER_PAGE_LARGER,
+        WRONG,
+        diff_to,
+    )  # fmt: skip
+
+    class Seq:
+        def __init__(self):
+            self.n = 0
+
+        def plan(self, **_):
+            rounds = [[WRONG], [PER_PAGE_LARGER, PARTIAL_LAST]]
+            self.n += 1
+            return VerificationPlan(tests=rounds[min(self.n - 1, 1)])
+
+    monkeypatch.setattr(
+        factory, "build_pipeline",
+        lambda on_event=None, *, adversarial=True: RepairPipeline(
+            sandbox=LocalSandbox(),
+            fixer=ScriptedFixer([diff_to(CORRECT_BODY), diff_to(CORRUPTED_BODY)]),
+            planner=Seq(), on_event=on_event, max_iterations=2,
+        ),
+    )  # fmt: skip
+    monkeypatch.setattr(
+        factory,
+        "build_reverifier",
+        lambda on_event=None, usage=None: RepairPipeline.for_reverification(
+            LocalSandbox(), on_event=on_event
+        ),
+    )
+    created = client.post(
+        "/api/v1/investigations",
+        json={"issue": ISSUE, "example_case": "paginate-app"},
+    )
+    iid = created.json()["id"]
+    assert client.post(f"/api/v1/investigations/{iid}/run").status_code == 202
+    wait_for(iid)
+    return iid
+
+
+def wait_for(iid: str) -> dict:
+    for _ in range(150):
+        state = client.get(f"/api/v1/investigations/{iid}").json()
+        if state["stage"] in ("completed", "failed"):
+            return state
+        time.sleep(0.3)
+    raise AssertionError("timed out")
+
+
+def test_reverify_endpoint_excludes_a_wrong_test_and_links_to_the_parent(
+    contested_investigation,
+) -> None:
+    iid = contested_investigation
+    base = client.get(f"/api/v1/investigations/{iid}").json()["certificate"]
+    assert base["verdict"] == "not_verified" and base["selected_attempt"] == 1
+    reply = client.post(
+        f"/api/v1/investigations/{iid}/reverify",
+        json={
+            "attempt": 1,
+            "disputed": ["docstring_example"],
+            "reason": "page 3 holds item 5, so [] is wrong",
+        },
+    )
+    assert reply.status_code == 202, reply.text
+    new_id = reply.json()["investigation_id"]
+    assert new_id != iid
+    state = wait_for(new_id)
+    assert state["stage"] == "completed", state.get("error")
+    assert state["parent_id"] == iid
+    cert = state["certificate"]
+    assert cert["verdict"] == "verified_with_conditions" and cert["reverified_attempt"] == 1
+    assert any(lim.startswith("Human review:") for lim in cert["limitations"])
+    assert any(e["stage"] == "reverifying" for e in state["events"])
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"attempt": 1, "disputed": [], "reason": "a perfectly long reason"},
+        {
+            "attempt": 1,
+            "disputed": ["per_page_larger_than_items"],
+            "reason": "a perfectly long reason",
+        },
+        {"attempt": 1, "disputed": ["no_such_test"], "reason": "a perfectly long reason"},
+        {"attempt": 9, "disputed": ["docstring_example"], "reason": "a perfectly long reason"},
+        {"attempt": 1, "disputed": ["docstring_example"], "reason": "short"},
+    ],
+)
+def test_reverify_rejects_invalid_disputes(contested_investigation, body) -> None:
+    r = client.post(f"/api/v1/investigations/{contested_investigation}/reverify", json=body)
+    assert r.status_code == 422, r.text
+
+
+def test_reverify_requires_a_completed_investigation() -> None:
+    created = client.post(
+        "/api/v1/investigations", json={"issue": ISSUE, "example_case": "paginate-app"}
+    )
+    r = client.post(
+        f"/api/v1/investigations/{created.json()['id']}/reverify",
+        json={"attempt": 1, "disputed": ["x"], "reason": "a perfectly long reason"},
+    )
+    assert r.status_code == 409

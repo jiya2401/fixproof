@@ -22,10 +22,41 @@ def _unsafe(path: str) -> str | None:
 
 
 def _hint(text: str, search: str) -> str:
-    first = next((ln.strip() for ln in search.splitlines() if ln.strip()), "")
-    candidates = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    close = difflib.get_close_matches(first, candidates, n=1, cutoff=0.6)
-    return f" Closest line in the file: {close[0]!r}." if close else ""
+    search_lines = search.split("\n")
+    while search_lines and not search_lines[-1].strip():
+        search_lines.pop()
+    first = next((i for i, ln in enumerate(search_lines) if ln.strip()), None)
+    if first is None:
+        return ""
+    file_lines = text.split("\n")
+    target = search_lines[first].strip()
+    best: tuple[int, int] | None = None  # (file position, number of identical lines)
+    for pos, line in enumerate(file_lines):
+        if line.strip() != target:
+            continue
+        run = 0
+        while (
+            first + run < len(search_lines)
+            and pos + run < len(file_lines)
+            and search_lines[first + run] == file_lines[pos + run]
+        ):
+            run += 1
+        if best is None or run > best[1]:
+            best = (pos, run)
+    if best is None:
+        close = difflib.get_close_matches(
+            target, [ln.strip() for ln in file_lines if ln.strip()], n=1, cutoff=0.6
+        )
+        return f" Closest line in the file: {close[0]!r}." if close else ""
+    pos, run = best
+    s_idx, f_idx = first + run, pos + run
+    if s_idx >= len(search_lines):
+        return ""
+    got = file_lines[f_idx] if f_idx < len(file_lines) else "<end of file>"
+    return (
+        f" Line {s_idx + 1} of your SEARCH differs from the file: you wrote "
+        f"{search_lines[s_idx]!r} but the file has {got!r}."
+    )
 
 
 def build_diff_from_edits(root: Path, edits: list[FileEdit]) -> tuple[str, list[str]]:

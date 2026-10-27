@@ -34,6 +34,8 @@ export type Iteration = {
   counterexamples: string[]
   feedback_to_fixer: string | null
   note: string
+  test_results: Record<string, string>
+  score: number | null
 }
 
 export type AdversarialTest = {
@@ -42,6 +44,9 @@ export type AdversarialTest = {
   spec_quote: string
   grounded: boolean
   grounding_note: string
+  key: string
+  disputed: boolean
+  dispute_reason: string
   code: string
 }
 
@@ -80,6 +85,10 @@ export type Certificate = {
   iterations: Iteration[]
   adversarial_tests: AdversarialTest[]
   max_iterations: number
+  selected_attempt: number | null
+  contested: string[]
+  derived_from: string | null
+  reverified_attempt: number | null
   limitations: string[]
   disclaimers: string[]
   verdict: Verdict
@@ -97,6 +106,7 @@ export type InvestigationState = {
   issue: string
   project_name: string | null
   example_case: string | null
+  parent_id: string | null
   events: TimelineEvent[]
   certificate: Certificate | null
 }
@@ -243,4 +253,13 @@ export async function startInvestigation(args: {
   )
   await call(`/api/v1/investigations/${created.id}/run`, { method: 'POST' })
   return created.id
+}
+
+export async function reverifyInvestigation(
+  id: string, attempt: number, disputed: string[], reason: string,
+): Promise<string> {
+  const reply = await call<{ investigation_id: string }>(
+    `/api/v1/investigations/${id}/reverify`, json({ attempt, disputed, reason }),
+  )
+  return reply.investigation_id
 }

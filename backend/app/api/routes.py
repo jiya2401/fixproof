@@ -5,7 +5,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, HttpUrl
 
-from app.certificate import FixCertificate, TimelineEvent
+from app.certificate import FixCertificate, IterationRecord, TimelineEvent
 from app.config import get_settings
 from app.evaluation import load_cases
 from app.llm.nebius import NebiusConfigurationError
@@ -13,6 +13,7 @@ from app.orchestrator.state import InvestigationStage, InvestigationState
 from app.pipeline import factory
 from app.projects import ProjectError, ProjectInfo, ProjectStore
 from app.sandbox.factory import SandboxUnavailable, get_sandbox
+from app.verification.results import CheckOutcome
 from app.verification.scan import ScanResult, TargetError, scan_project, validate_repro_targets
 
 router = APIRouter(prefix="/api/v1")
@@ -30,6 +31,7 @@ _STAGE_MAP = {
     "investigating": InvestigationStage.INVESTIGATING,
     "fixing": InvestigationStage.FIXING,
     "planning_verification": InvestigationStage.PLANNING_VERIFICATION,
+    "reverifying": InvestigationStage.VERIFYING,
     "verifying": InvestigationStage.VERIFYING,
     "repairing": InvestigationStage.REPAIRING,
 }
@@ -41,6 +43,12 @@ class CreateInvestigationRequest(BaseModel):
     example_case: str | None = None
     project_id: str | None = None
     repro_targets: list[str] = []
+
+
+class ReverifyRequest(BaseModel):
+    attempt: int
+    disputed: list[str]
+    reason: str
 
 
 class GitProjectRequest(BaseModel):
@@ -213,39 +221,63 @@ def get_investigation(investigation_id: str) -> InvestigationState:
     return _get(investigation_id)
 
 
+def _apply_certificate(state: InvestigationState, cert: FixCertificate) -> None:
+    state.certificate = cert
+    state.verdict = cert.verdict
+    state.patch = cert.final_patch
+    state.root_cause = cert.selected_root_cause or None
+    state.repair_iteration = len(cert.iterations)
+    state.limitations = cert.limitations
+    state.stage = InvestigationStage.COMPLETED
+
+
 def _execute(state: InvestigationState, pipeline: Any, source: Path, label: str) -> None:
     try:
-        cert = pipeline.run(
-            source=source,
-            issue=state.issue,
-            repro_targets=state.repro_targets,
-            investigation_id=state.id,
-            source_label=label,
+        _apply_certificate(
+            state,
+            pipeline.run(
+                source=source,
+                issue=state.issue,
+                repro_targets=state.repro_targets,
+                investigation_id=state.id,
+                source_label=label,
+            ),
         )
-        state.certificate = cert
-        state.verdict = cert.verdict
-        state.patch = cert.final_patch
-        state.root_cause = cert.selected_root_cause or None
-        state.repair_iteration = len(cert.iterations)
-        state.limitations = cert.limitations
-        state.stage = InvestigationStage.COMPLETED
     except Exception as exc:  # noqa: BLE001 - surfaced to the client, never a fake verdict
         state.error = f"{type(exc).__name__}: {exc}"
         state.stage = InvestigationStage.FAILED
 
 
+def _source_for(state: InvestigationState) -> tuple[Path, str]:
+    if state.project_id:
+        info, source = _project(state.project_id)
+        return source, f"project/{info.name}"
+    if state.example_case:
+        return EXAMPLES_ROOT / state.example_case, f"examples/{state.example_case}"
+    raise HTTPException(
+        status_code=422, detail="Choose a project or a bundled example before running."
+    )
+
+
+def _disputable_keys(cert: FixCertificate, attempt: IterationRecord) -> set[str]:
+    """Grounded, not-yet-excluded attack tests that actually failed on this attempt's patch."""
+    keys: set[str] = set()
+    for test in cert.adversarial_tests:
+        key = test.key
+        if not key or not test.grounded or test.disputed:
+            continue
+        failed = attempt.test_results.get(key) == "failed" or any(
+            f"test_adv_{key}" in c for c in attempt.counterexamples
+        )
+        if failed:
+            keys.add(key)
+    return keys
+
+
 @router.post("/investigations/{investigation_id}/run", status_code=status.HTTP_202_ACCEPTED)
 def run_investigation(investigation_id: str, background: BackgroundTasks) -> dict[str, str]:
     state = _get(investigation_id)
-    if state.project_id:
-        info, source = _project(state.project_id)
-        label = f"project/{info.name}"
-    elif state.example_case:
-        source, label = EXAMPLES_ROOT / state.example_case, f"examples/{state.example_case}"
-    else:
-        raise HTTPException(
-            status_code=422, detail="Choose a project or a bundled example before running."
-        )
+    source, label = _source_for(state)
     if state.stage not in (InvestigationStage.CREATED, InvestigationStage.FAILED):
         raise HTTPException(status_code=409, detail=f"Investigation is {state.stage}")
 
@@ -263,6 +295,79 @@ def run_investigation(investigation_id: str, background: BackgroundTasks) -> dic
     state.stage = InvestigationStage.REPRODUCING
     background.add_task(_execute, state, pipeline, source, label)
     return {"status": "accepted", "investigation_id": state.id}
+
+
+@router.post("/investigations/{investigation_id}/reverify", status_code=status.HTTP_202_ACCEPTED)
+def reverify_investigation(
+    investigation_id: str, payload: ReverifyRequest, background: BackgroundTasks
+) -> dict[str, str]:
+    """Human review: re-run every check on one attempt's patch, excluding attack tests the
+    reviewer judges wrong. Makes no model calls; the exclusion is recorded in the certificate."""
+    state = _get(investigation_id)
+    base = state.certificate
+    if base is None or state.stage != InvestigationStage.COMPLETED:
+        raise HTTPException(
+            status_code=409, detail="Only a completed investigation can be re-verified"
+        )
+    reason = payload.reason.strip()
+    if not 10 <= len(reason) <= 500:
+        raise HTTPException(status_code=422, detail="Give a reason of 10-500 characters")
+    attempt = next((it for it in base.iterations if it.index == payload.attempt), None)
+    applied = attempt is not None and any(
+        c.name == "patch_applies_in_scope" and c.outcome == CheckOutcome.PASSED
+        for c in attempt.checks
+    )
+    if attempt is None or not attempt.diff or not applied:
+        raise HTTPException(status_code=422, detail="That attempt has no applicable patch")
+    allowed = _disputable_keys(base, attempt)
+    bad = [k for k in payload.disputed if k not in allowed]
+    if not payload.disputed or bad:
+        raise HTTPException(
+            status_code=422,
+            detail="Only spec-grounded attack tests that failed on that attempt can be disputed"
+            + (f" (not allowed: {', '.join(bad)})" if bad else ""),
+        )
+    source, label = _source_for(state)
+    new = InvestigationState(
+        repo_url=state.repo_url, issue=state.issue, example_case=state.example_case,
+        project_id=state.project_id, project_name=state.project_name,
+        repro_targets=state.repro_targets, parent_id=state.id,
+    )  # fmt: skip
+
+    def on_event(stage: str, message: str) -> None:
+        new.events.append(TimelineEvent(stage=stage, message=message))
+        if stage in _STAGE_MAP:
+            new.stage = _STAGE_MAP[stage]
+
+    try:
+        pipeline = factory.build_reverifier(on_event, base.model.model_dump())
+    except SandboxUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    new.stage = InvestigationStage.REPRODUCING
+    _INVESTIGATIONS[new.id] = new
+
+    def work() -> None:
+        try:
+            _apply_certificate(
+                new,
+                pipeline.reverify(
+                    source=source,
+                    issue=new.issue,
+                    repro_targets=new.repro_targets,
+                    base=base,
+                    attempt=payload.attempt,
+                    disputed=payload.disputed,
+                    reason=reason,
+                    investigation_id=new.id,
+                    source_label=label,
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            new.error = f"{type(exc).__name__}: {exc}"
+            new.stage = InvestigationStage.FAILED
+
+    background.add_task(work)
+    return {"status": "accepted", "investigation_id": new.id}
 
 
 @router.get("/investigations/{investigation_id}/certificate", response_model=FixCertificate)

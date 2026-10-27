@@ -19,7 +19,8 @@ export function stepIndex(e: TimelineEvent): number {
     case 'fixing':
     case 'repairing': return 2
     case 'verifying': return /adversarial/i.test(e.message) ? 4 : 3
-    case 'reviewing': return 3
+    case 'reviewing':
+    case 'reverifying': return 3
     case 'planning_verification': return 4
     default: return 5
   }

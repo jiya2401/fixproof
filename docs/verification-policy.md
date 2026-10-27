@@ -72,12 +72,21 @@ budget.* The certificate lists exactly what ran and what did not.
   live run: a test required rejecting `"refresh: abc123"`, which no stated rule covers), but a grounded
   test can still over-interpret its quote, and a passing one may be weak. Treat counterexamples as
   candidates for human review; mutation testing is not implemented.
-- **Observed false counterexample that grounding cannot catch (live run, paginate case):** a test quoted
-  the real docstring sentence about a page past the end, then asserted `paginate([1,2,3,4,5], 3, 2) == []`.
-  Page 3 is `[5]` (the last partial page), so the assertion was wrong. A wrong grounded test fails every
-  later patch, so the loop cannot reach `VERIFIED`; the verdict is then `NOT_VERIFIED` through no fault of the
-  patch. The benchmark reports this as the false-rejection rate. Not mitigated yet; possible mitigations
-  (human dispute with the exclusion recorded as a condition; annotation-only model review) are not built.
+- **False counterexamples that grounding cannot catch (seen in two live paginate runs):** a test quoted the
+  real docstring sentence about a page past the end, then asserted `paginate([1,2,3,4,5], 3, 2) == []`. Page 3 is
+  `[5]`, so the assertion was wrong. Effects seen live: a correct patch was rejected, and the fixer, steered by the
+  wrong test, produced a worse patch (returning `[]` for partial last pages), which the executed tests then correctly
+  rejected. Mitigations now built:
+  1. every attack test is run against every attempt's patch; tests that cannot all be satisfied by the attempts
+     (one group passes only on attempt i, the other only on attempt j) are reported as **contested** and the fixer
+     is warned not to trade one group for the other;
+  2. the certificate reports the **least-bad attempt** (fewest executed failures; ties go to the later attempt),
+     not blindly the last one;
+  3. **human dispute**: a reviewer can exclude a failing, spec-grounded attack test with a written reason, and
+     every check is re-run on that attempt's patch with no model calls. The exclusion is a recorded condition
+     (verdict at most `VERIFIED_WITH_CONDITIONS`); only tests that failed on that attempt can be excluded, and
+     excluding tests never hides a failure from another test.
+  Not solved: nothing decides *automatically* which side of a contradiction is right.
 - If the test-author reply cannot be parsed in an iteration, tests from earlier iterations still run and
   a limitation is recorded (verdict at most `VERIFIED_WITH_CONDITIONS`).
 - Hypotheses are not experimentally discriminated (recorded as `proposed_untested`).
