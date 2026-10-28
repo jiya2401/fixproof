@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 from unittest.mock import MagicMock, patch
+from pydantic import ValidationError
 
 import pytest
 
@@ -23,7 +24,6 @@ from app.explanation import (
     build_explanation_prompt,
     generate_explanation,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -197,7 +197,7 @@ class TestParseExplanation:
     def test_raises_on_missing_required_key(self) -> None:
         """Missing 'the_fix' must fail Pydantic validation."""
         bad = json.dumps({"root_cause": "rc", "technical_keywords": ["a", "b"]})
-        with pytest.raises(Exception):  # pydantic ValidationError
+        with pytest.raises(ValidationError):
             _parse_explanation(bad)
 
     def test_strips_whitespace_around_json(self) -> None:

@@ -35,8 +35,8 @@ from app.repair.patching import (
     snapshot_hash,
     touched_paths,
 )
-from app.security import SecurityScanResult, VulnerabilityFinding, run_security_scan
 from app.sandbox.base import SandboxRunner
+from app.security import SecurityScanResult, VulnerabilityFinding, run_security_scan
 from app.verification.contest import find_contests
 from app.verification.grounding import build_spec_corpus, check_grounding
 from app.verification.pytest_runner import run_pytest_check

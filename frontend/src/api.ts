@@ -50,6 +50,20 @@ export type AdversarialTest = {
   code: string
 }
 
+export type VulnerabilityFinding = {
+  file: string
+  line_number: number
+  issue_description: string
+  severity: 'HIGH' | 'MEDIUM' | 'LOW' | string
+  rule_id?: string
+}
+
+export type FixExplanation = {
+  root_cause: string
+  the_fix: string
+  technical_keywords: string[]
+}
+
 export type Certificate = {
   certificate_id: string
   policy_version: string
@@ -95,6 +109,10 @@ export type Certificate = {
   verdict_reasons: string[]
   timeline: { at: string; stage: string; message: string }[]
   certificate_sha256: string
+  security_verified?: boolean | null
+  security_seal?: 'Verified Secure' | 'SECURITY COMPROMISED' | string | null
+  vulnerabilities?: VulnerabilityFinding[] | null
+  explanation?: FixExplanation | null
 }
 
 export type TimelineEvent = { at: string; stage: string; message: string }

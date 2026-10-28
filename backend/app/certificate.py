@@ -3,6 +3,9 @@
 import hashlib
 import json
 from datetime import UTC, datetime
+
+# ---- Feature 3: explanation model ----
+from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -16,9 +19,6 @@ from app.verification.results import (
     VerificationVerdict,
 )
 from app.verification.verdict import POLICY_VERSION
-
-# ---- Feature 3: explanation model ----
-from typing import Any, Optional
 
 STANDING_DISCLAIMERS = [
     "Not a proof of correctness: no counterexample was found by the executed checks.",
@@ -133,7 +133,7 @@ class FixCertificate(BaseModel):
     )
 
     # ---- Feature 3: Visual Explanations ----
-    explanation: Optional[Any] = Field(
+    explanation: Any | None = Field(
         default=None,
         description="Structured dashboard explanation of the root cause and fix.",
     )

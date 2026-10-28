@@ -43,7 +43,10 @@ class FixExplanation(BaseModel):
         description="A 1-2 sentence description of how the patch resolves the root cause.",
     )
     technical_keywords: list[str] = Field(
-        description="A list of 2-4 concise architectural or domain terms that characterise the fix.",
+        description=(
+            "A list of 2-4 concise architectural or domain terms "
+            "that characterise the fix."
+        ),
     )
 
     @field_validator("technical_keywords")
@@ -149,7 +152,9 @@ def _parse_explanation(raw: str) -> FixExplanation:
         if start != -1 and end > start:
             data = json.loads(text[start : end + 1])
         else:
-            raise ValueError(f"No JSON object found in LLM output: {raw[:200]!r}")
+            raise ValueError(
+                f"No JSON object found in LLM output: {raw[:200]!r}"
+            )
 
     if not isinstance(data, dict):
         raise ValueError(f"Expected a JSON object, got {type(data).__name__}")

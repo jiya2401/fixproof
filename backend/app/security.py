@@ -421,7 +421,7 @@ class _SecurityVisitor(ast.NodeVisitor):
     def _check_pickle_bare(self, node: ast.Call, fname: str) -> None:
         if fname not in _PICKLE_NAMES:
             return
-        if not self._from_imports.get(fname, "").split(".")[0] in (
+        if self._from_imports.get(fname, "").split(".")[0] not in (
             "pickle",
             "_pickle",
             "cPickle",

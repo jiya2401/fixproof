@@ -133,6 +133,82 @@ export default function CertificateView({
         </ul>
       </section>
 
+      {/* 🛡️ Feature 4: Security Status & Vulnerability Ledger */}
+      {cert.security_seal === 'Verified Secure' && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-400/30 bg-emerald-400/10 p-4 text-sm text-emerald-200">
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl bg-emerald-500/20 p-2 text-emerald-300">
+              <Shield className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="font-semibold text-emerald-100 flex items-center gap-2">
+                Verified Secure (0 New Findings)
+                <span className="rounded-md border border-emerald-400/30 bg-emerald-400/20 px-2 py-0.5 text-[11px] font-medium text-emerald-200">
+                  SAST Passed
+                </span>
+              </p>
+              <p className="text-xs text-emerald-300/80">
+                Automated SAST differential scan confirmed no new SQL injection, command injection, or path traversal vulnerabilities.
+              </p>
+            </div>
+          </div>
+          <Pill tone="green">Verified Clean</Pill>
+        </div>
+      )}
+
+      {cert.security_seal === 'SECURITY COMPROMISED' && (
+        <Card className="border-red-400/40 bg-gradient-to-br from-red-500/15 via-red-950/20 to-black/30 p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="rounded-xl bg-red-500/20 p-2 text-red-300">
+                <Alert className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-red-100 flex items-center gap-2">
+                  Security Alert: Malicious or Weak Code Detected
+                  <span className="rounded-md border border-red-400/30 bg-red-400/20 px-2 py-0.5 text-[11px] font-medium text-red-200">
+                    SAST Compromised
+                  </span>
+                </h3>
+                <p className="text-xs text-red-300/80">
+                  Static analysis detected new medium/high-severity vulnerabilities introduced by this patch.
+                </p>
+              </div>
+            </div>
+            <Pill tone="red">Compromised</Pill>
+          </div>
+
+          {cert.vulnerabilities && cert.vulnerabilities.length > 0 && (
+            <div className="mt-5 overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="border-b border-red-400/20 text-[11px] uppercase tracking-wider text-red-300/70">
+                  <tr>
+                    <th className="pb-2 pr-4 font-medium">Severity</th>
+                    <th className="pb-2 pr-4 font-medium">File</th>
+                    <th className="pb-2 pr-4 font-medium">Line</th>
+                    <th className="pb-2 font-medium">Issue Description</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-red-400/10">
+                  {cert.vulnerabilities.map((v, idx) => (
+                    <tr key={`${v.file}-${v.line_number}-${idx}`} className="align-top">
+                      <td className="py-2.5 pr-4">
+                        <Pill tone={v.severity === 'HIGH' ? 'red' : v.severity === 'MEDIUM' ? 'amber' : 'gray'}>
+                          {v.severity}
+                        </Pill>
+                      </td>
+                      <td className="mono py-2.5 pr-4 text-zinc-200">{v.file}</td>
+                      <td className="mono py-2.5 pr-4 tabular-nums text-zinc-400">{v.line_number}</td>
+                      <td className="py-2.5 text-zinc-300">{v.issue_description}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      )}
+
       {cert.derived_from && (
         <div className="flex gap-3 rounded-2xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100">
           <Alert className="mt-0.5 h-4 w-4 shrink-0" />
@@ -219,6 +295,67 @@ export default function CertificateView({
         <Card className="p-6">
           <SectionTitle hint={`${cert.changed_files.join(', ')}`}>Final patch</SectionTitle>
           <DiffView diff={cert.final_patch} />
+        </Card>
+      )}
+
+      {/* 🧠 Feature 3: Visual Explanations - Why I Fixed It */}
+      {cert.explanation && (cert.explanation.root_cause || cert.explanation.the_fix) && (
+        <Card className="p-6">
+          <details open className="group">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm focus:outline-none">
+              <div className="flex items-center gap-2.5">
+                <span className="text-base" aria-hidden="true">🧠</span>
+                <span className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-300">
+                  Why I Fixed It · AI Explanation
+                </span>
+                <span className="rounded-md border border-sky-400/30 bg-sky-400/10 px-2 py-0.5 text-[11px] font-medium text-sky-300">
+                  Auto-Generated
+                </span>
+              </div>
+              <span className="text-xs text-zinc-500 transition-transform duration-200 group-open:rotate-180">
+                ▼
+              </span>
+            </summary>
+
+            <div className="mt-5 space-y-4 pt-2">
+              <div className="grid gap-4 md:grid-cols-2">
+                {cert.explanation.root_cause && (
+                  <div className="rounded-xl border border-sky-400/20 bg-sky-400/5 p-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-sky-300">
+                      Root Cause
+                    </p>
+                    <p className="mt-1.5 text-sm leading-relaxed text-zinc-200">
+                      {cert.explanation.root_cause}
+                    </p>
+                  </div>
+                )}
+                {cert.explanation.the_fix && (
+                  <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/5 p-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-300">
+                      The Fix
+                    </p>
+                    <p className="mt-1.5 text-sm leading-relaxed text-zinc-200">
+                      {cert.explanation.the_fix}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {cert.explanation.technical_keywords && cert.explanation.technical_keywords.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <span className="text-xs font-medium text-zinc-500 mr-1">Domain Keywords:</span>
+                  {cert.explanation.technical_keywords.map((kw) => (
+                    <span
+                      key={kw}
+                      className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-medium text-zinc-300 shadow-sm"
+                    >
+                      {kw}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </details>
         </Card>
       )}
 
