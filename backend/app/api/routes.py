@@ -113,6 +113,7 @@ def about() -> dict[str, Any]:
             "bounded repair loop with counterexample feedback",
             "verdict policy v1 + sealed Fix Certificate",
             "open a GitHub pull request for a verified patch",
+            "post-patch SAST security scan (SQL/CMD/Path injection, secrets, weak crypto)",
         ],
         "not_implemented": [
             "hypothesis experiments",
@@ -248,6 +249,15 @@ def _apply_certificate(state: InvestigationState, cert: FixCertificate) -> None:
     state.repair_iteration = len(cert.iterations)
     state.limitations = cert.limitations
     state.stage = InvestigationStage.COMPLETED
+    # Feature 4: propagate security seal to state for dashboard consumption
+    state.security_seal = cert.security_seal  # type: ignore[attr-defined]
+    state.security_verified = cert.security_verified  # type: ignore[attr-defined]
+    # Feature 3: propagate explanation to state for dashboard display
+    if cert.explanation is not None:
+        try:
+            state.explanation = cert.explanation.model_dump()  # type: ignore[union-attr]
+        except AttributeError:
+            state.explanation = dict(cert.explanation)  # type: ignore[call-overload]
 
 
 def _execute(state: InvestigationState, pipeline: Any, source: Path, label: str) -> None:

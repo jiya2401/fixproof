@@ -8,6 +8,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from app.agents.models import AdversarialTest, FileEdit
+from app.security import VulnerabilityFinding
 from app.verification.results import (
     CheckOutcome,
     CheckResult,
@@ -15,6 +16,9 @@ from app.verification.results import (
     VerificationVerdict,
 )
 from app.verification.verdict import POLICY_VERSION
+
+# ---- Feature 3: explanation model ----
+from typing import Any, Optional
 
 STANDING_DISCLAIMERS = [
     "Not a proof of correctness: no counterexample was found by the executed checks.",
@@ -113,6 +117,27 @@ class FixCertificate(BaseModel):
     reverified_attempt: int | None = None
 
     limitations: list[str] = Field(default_factory=list)
+
+    # ---- Security SAST scan results (Feature 4) ----
+    vulnerabilities: list[VulnerabilityFinding] = Field(
+        default_factory=list,
+        description="New HIGH/MEDIUM security findings introduced by the patch.",
+    )
+    security_verified: bool | None = Field(
+        default=None,
+        description="None=scan not run; True=clean; False=new vulnerabilities found.",
+    )
+    security_seal: str | None = Field(
+        default=None,
+        description="Human-readable security verdict seal.",
+    )
+
+    # ---- Feature 3: Visual Explanations ----
+    explanation: Optional[Any] = Field(
+        default=None,
+        description="Structured dashboard explanation of the root cause and fix.",
+    )
+
     disclaimers: list[str] = Field(default_factory=lambda: list(STANDING_DISCLAIMERS))
     verdict: VerificationVerdict = VerificationVerdict.INSUFFICIENT_EVIDENCE
     verdict_reasons: list[str] = Field(default_factory=list)

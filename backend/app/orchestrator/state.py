@@ -61,3 +61,8 @@ class InvestigationState(BaseModel):
     repro_targets: list[str] = Field(default_factory=list)
     certificate: FixCertificate | None = None
     error: str | None = None
+    # ---- Feature 3: Visual Explanations ----
+    explanation: dict | None = None  # serialised FixExplanation for dashboard display
+    # ---- Feature 4: Security SAST Scan ----
+    security_seal: str | None = None
+    security_verified: bool | None = None

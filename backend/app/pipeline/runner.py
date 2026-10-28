@@ -35,6 +35,7 @@ from app.repair.patching import (
     snapshot_hash,
     touched_paths,
 )
+from app.security import SecurityScanResult, VulnerabilityFinding, run_security_scan
 from app.sandbox.base import SandboxRunner
 from app.verification.contest import find_contests
 from app.verification.grounding import build_spec_corpus, check_grounding
@@ -189,6 +190,48 @@ class _NoModel:
         raise RuntimeError("re-verification makes no model calls")
 
 
+def _scan_to_check(result: SecurityScanResult) -> CheckResult:
+    """Convert a :class:`SecurityScanResult` into a pipeline :class:`CheckResult`."""
+    if result.error:
+        return CheckResult(
+            name="security_sast",
+            required=False,
+            outcome=CheckOutcome.ERROR,
+            summary=f"SAST scanner error (non-blocking): {result.error}",
+        )
+    new_count = len(result.new_vulnerabilities)
+    if result.passed:
+        summary = (
+            f"Security SAST: no new HIGH/MEDIUM vulnerabilities introduced "
+            f"({result.files_scanned} file(s) scanned, "
+            f"{result.post_patch_count} pre-existing finding(s), "
+            f"scan took {result.scan_duration_seconds:.2f}s)"
+        )
+        return CheckResult(
+            name="security_sast",
+            required=False,
+            outcome=CheckOutcome.PASSED,
+            summary=summary,
+        )
+    # Failed — new vulnerabilities introduced
+    counterexamples = [
+        f"[{v.severity}] {v.file}:{v.line_number} {v.rule_id}: {v.issue_description}"
+        for v in result.new_vulnerabilities
+    ]
+    summary = (
+        f"Security SAST: {new_count} NEW vulnerability(ies) introduced by the patch "
+        f"({result.files_scanned} file(s) scanned). "
+        f"Findings: {chr(10).join(counterexamples[:5])}"
+    )
+    return CheckResult(
+        name="security_sast",
+        required=False,
+        outcome=CheckOutcome.FAILED,
+        summary=summary,
+        counterexamples=counterexamples,
+    )
+
+
 class RepairPipeline:
     def __init__(
         self,
@@ -216,6 +259,8 @@ class RepairPipeline:
         self._adv_suite: dict[str, AdversarialTest] = {}
         self.model_info = model_info
         self.on_event = on_event
+        # Feature 4: iteration_index -> SecurityScanResult (avoids touching Pydantic model)
+        self._sast_results: dict[int, SecurityScanResult] = {}
 
     def run(
         self,
@@ -235,6 +280,8 @@ class RepairPipeline:
             sandbox=self.sandbox.describe(),
             max_iterations=self.max_iterations,
         )
+
+        self._sast_results = {}  # reset for each pipeline.run() call
 
         def event(stage: str, message: str) -> None:
             cert.timeline.append(TimelineEvent(stage=stage, message=message))
@@ -460,7 +507,17 @@ class RepairPipeline:
                     and regression.outcome == CheckOutcome.PASSED
                 ):
                     adversarial.append(self._review(ws, proposal, issue, event))
-            return [scope, green, regression, *adversarial]
+            # ---- Feature 4: Security SAST scan ----
+            sast_result = run_security_scan(
+                source=source,
+                workspace=ws,
+                changed_files=record.changed_files if record.changed_files else None,
+            )
+            sast_check = _scan_to_check(sast_result)
+            # Store against iteration index so _finish() can look it up
+            # without touching the sealed Pydantic IterationRecord model.
+            self._sast_results[record.index] = sast_result
+            return [scope, green, regression, *adversarial, sast_check]
         finally:
             self.sandbox.destroy(ws)
 
@@ -824,6 +881,65 @@ class RepairPipeline:
         decision = evaluate_policy(report)
         cert.verdict, cert.verdict_reasons = decision.verdict, decision.reasons
         cert.policy_version = decision.policy_version
+
+        # ---- Feature 4: aggregate security findings onto the certificate ----
+        all_new_vulns: list[VulnerabilityFinding] = []
+        for it in cert.iterations:
+            sast = self._sast_results.get(it.index)
+            if sast is not None and not sast.passed:
+                all_new_vulns.extend(sast.new_vulnerabilities)
+        # De-duplicate by fingerprint, keeping first occurrence
+        seen_fps: set[str] = set()
+        deduped: list[VulnerabilityFinding] = []
+        for v in all_new_vulns:
+            fp = v.fingerprint()
+            if fp not in seen_fps:
+                seen_fps.add(fp)
+                deduped.append(v)
+        cert.vulnerabilities = deduped
+        # The *selected* attempt's SAST result drives the top-level verdict seal
+        selected_sast: SecurityScanResult | None = None
+        if cert.selected_attempt is not None:
+            selected_sast = self._sast_results.get(cert.selected_attempt)
+        if selected_sast is None and cert.iterations:
+            selected_sast = self._sast_results.get(cert.iterations[-1].index)
+        if selected_sast is not None:
+            cert.security_verified = selected_sast.passed
+            cert.security_seal = (
+                "Verified Secure"
+                if selected_sast.passed
+                else "SECURITY COMPROMISED"
+            )
+
+        # ---- Feature 3: Visual Explanations - generate "Why I Fixed It" before sealing ----
+        if cert.final_patch:
+            try:
+                from app.explanation import generate_explanation
+
+                # Collect the best traceback from the reproduction check
+                repro_check = next(
+                    (c for c in checks if c.name == "reproduction_red"), None
+                )
+                traceback_text = (
+                    repro_check.output_excerpt if repro_check else ""
+                ) or ""
+                # Collect a snapshot of the pre-patch code (stored in focus text)
+                buggy_code_snapshot = self._focus_text or ""
+                llm_client = (
+                    getattr(self, "_explanation_llm_client", None)
+                )  # injectable for tests
+                cert.explanation = generate_explanation(
+                    buggy_code_snapshot,
+                    traceback_text,
+                    cert.final_patch,
+                    llm_client=llm_client,
+                )
+            except Exception as _exc:  # noqa: BLE001 — never fatal
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "explanation hook failed: %s", _exc
+                )
+
         if self.on_event:
             self.on_event("completed", f"verdict: {cert.verdict.value}")
         cert.timeline.append(TimelineEvent(stage="verdict", message=cert.verdict.value))
