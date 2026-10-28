@@ -1,4 +1,4 @@
-"""Intake of user projects: zip upload, GitHub URL, or an allow-listed local folder.
+﻿"""Intake of user projects: zip upload, GitHub URL, or an allow-listed local folder.
 
 Everything here treats the project as hostile data: archives are extracted with path/size/symlink
 checks, git is run without hooks/submodules/credentials, local paths must live under an
@@ -46,6 +46,9 @@ class ProjectInfo(BaseModel):
     bytes: int = 0
     python_files: int = 0
     test_files: int = 0
+    # Detected primary language — set by LanguageDetector after upload.
+    # Values: "python" | "javascript" | "go"
+    language: str = "python"
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -188,9 +191,16 @@ class ProjectStore:
         src = self._slot(info) / "src"
         try:
             _describe(src, info)
-            if info.python_files == 0:
+            # Detect language and relax the Python-only guard for JS/Go projects.
+            from app.runners.detector import detect_language  # local import avoids circular dep
+            info.language = str(detect_language(src))
+            is_python = info.language == "python"
+            has_go_mod = (src / "go.mod").exists()
+            has_pkg_json = (src / "package.json").exists()
+            if info.python_files == 0 and not has_go_mod and not has_pkg_json:
                 raise ProjectError(
-                    "no Python files found: FixProof currently repairs Python projects"
+                    "no Python files found; for JavaScript/TypeScript include package.json,"
+                    " or for Go include go.mod"
                 )
         except ProjectError:
             _rmtree(self._slot(info))
