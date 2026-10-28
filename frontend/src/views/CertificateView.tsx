@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import type { Certificate, Check, Iteration, Outcome, Verdict } from '../api'
+import type { Certificate, Check, Iteration, Outcome, ProjectInfo, Verdict } from '../api'
 import {
   Alert, Button, Card, Check as CheckIcon, Copy, Cross, Download, Pill, SectionTitle, Shield, Stat,
   type Tone,
 } from '../ui'
 import DiffView from './DiffView'
+import PullRequestPanel from './PullRequestPanel'
 import ReviewPanel from './ReviewPanel'
 
 const VERDICTS: Record<Verdict, { label: string; line: string; tone: string; icon: 'ok' | 'warn' | 'bad' | 'none' }> = {
@@ -72,12 +73,14 @@ function Chip({ check }: { check: Check }) {
 }
 
 export default function CertificateView({
-  cert, onReset, investigationId, onReverify,
+  cert, onReset, investigationId, onReverify, githubConfigured = false, project,
 }: {
   cert: Certificate
   onReset: () => void
   investigationId?: string
   onReverify?: (newId: string) => void
+  githubConfigured?: boolean
+  project?: ProjectInfo | null
 }) {
   const [copied, setCopied] = useState<string | null>(null)
   const v = VERDICTS[cert.verdict]
@@ -217,6 +220,11 @@ export default function CertificateView({
           <SectionTitle hint={`${cert.changed_files.join(', ')}`}>Final patch</SectionTitle>
           <DiffView diff={cert.final_patch} />
         </Card>
+      )}
+
+      {investigationId && (
+        <PullRequestPanel cert={cert} investigationId={investigationId}
+          githubConfigured={githubConfigured} project={project} />
       )}
 
       <Card className="p-6">
