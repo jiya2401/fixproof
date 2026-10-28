@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 # Module-level import so tests can patch app.explanation.NebiusClient
 try:
     from app.llm.nebius import NebiusClient as _NebiusClient
+
     NebiusClient = _NebiusClient
 except Exception:  # noqa: BLE001 — no key configured yet in test environments
     NebiusClient = None  # type: ignore[assignment]
@@ -44,8 +45,7 @@ class FixExplanation(BaseModel):
     )
     technical_keywords: list[str] = Field(
         description=(
-            "A list of 2-4 concise architectural or domain terms "
-            "that characterise the fix."
+            "A list of 2-4 concise architectural or domain terms that characterise the fix."
         ),
     )
 
@@ -54,7 +54,7 @@ class FixExplanation(BaseModel):
     def clamp_keywords(cls, v: list[str]) -> list[str]:
         """Silently clamp the keyword list to 2-4 items to honour the UI contract."""
         # Ensure we have at least 2 items, then cap at 4
-        padded = (v + ["bug-fix", "patch"])[:max(2, len(v))]
+        padded = (v + ["bug-fix", "patch"])[: max(2, len(v))]
         return padded[:4]
 
 
@@ -71,9 +71,10 @@ OUTPUT RULES — read these carefully and follow them exactly:
 1. Return a single, raw JSON object. No markdown. No ```json fences. No prose before or after.
 2. The object must contain EXACTLY these three keys:
    - "root_cause"          : string — max 2 sentences; the fundamental technical cause.
-   - "the_fix"             : string — max 2 sentences; what the patch changed and why it resolves the root cause.
-   - "technical_keywords"  : array of 2-4 short strings; precise architectural or domain terms
-                             (e.g. "off-by-one error", "SQL injection", "race condition", "integer overflow").
+   - "the_fix"             : string — max 2 sentences; what the patch changed and
+                             why it resolves the root cause.
+   - "technical_keywords"  : array of 2-4 short strings; precise architectural or
+                             domain terms (e.g. "off-by-one", "SQL injection", "race condition").
 3. Do NOT include extra keys, nesting, or explanatory text.
 4. Be precise. Avoid filler words like "simply" or "just".
 5. If information is genuinely absent, write "Insufficient context." for that field.\
@@ -126,6 +127,7 @@ def build_explanation_prompt(
 # LLM call + parsing
 # ---------------------------------------------------------------------------
 
+
 def _parse_explanation(raw: str) -> FixExplanation:
     """Parse the LLM's raw string into a validated ``FixExplanation``.
 
@@ -147,14 +149,12 @@ def _parse_explanation(raw: str) -> FixExplanation:
     # Strategy 2: JSON decode
     try:
         data = json.loads(text)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as exc:
         start, end = text.find("{"), text.rfind("}")
         if start != -1 and end > start:
             data = json.loads(text[start : end + 1])
         else:
-            raise ValueError(
-                f"No JSON object found in LLM output: {raw[:200]!r}"
-            )
+            raise ValueError(f"No JSON object found in LLM output: {raw[:200]!r}") from exc
 
     if not isinstance(data, dict):
         raise ValueError(f"Expected a JSON object, got {type(data).__name__}")
@@ -204,9 +204,7 @@ def generate_explanation(
 
         raw = llm_client.complete(system=system, user=user, temperature=0.0)
         explanation = _parse_explanation(raw)
-        logger.info(
-            "explanation: generated successfully (%d chars raw)", len(raw)
-        )
+        logger.info("explanation: generated successfully (%d chars raw)", len(raw))
         return explanation
 
     except Exception as exc:  # noqa: BLE001  — never let this kill the pipeline

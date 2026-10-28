@@ -327,9 +327,7 @@ class _SecurityVisitor(ast.NodeVisitor):
             )
 
     # ------------------------------------------------------------------ B102: Command Injection
-    def _check_subprocess_call(
-        self, node: ast.Call, obj_name: str | None, method: str
-    ) -> None:
+    def _check_subprocess_call(self, node: ast.Call, obj_name: str | None, method: str) -> None:
         if method not in _SUBPROCESS_NAMES:
             return
         is_subprocess = obj_name in self._subprocess_names or obj_name == "subprocess"
@@ -361,9 +359,7 @@ class _SecurityVisitor(ast.NodeVisitor):
                 "a dynamic command argument. Pass a list of arguments instead.",
             )
 
-    def _check_os_system(
-        self, node: ast.Call, obj_name: str | None, method: str
-    ) -> None:
+    def _check_os_system(self, node: ast.Call, obj_name: str | None, method: str) -> None:
         if method not in ("system", "popen") or obj_name not in self._os_names:
             return
         if _first_arg_is_dynamic(node):
@@ -398,10 +394,8 @@ class _SecurityVisitor(ast.NodeVisitor):
                     "expected base directory.",
                 )
 
-    # ------------------------------------------------------------------ B202: Unsafe Deserialization
-    def _check_pickle_call(
-        self, node: ast.Call, obj_name: str | None, method: str
-    ) -> None:
+    # ------------------------------------------------------------- B202: Unsafe Deserialization
+    def _check_pickle_call(self, node: ast.Call, obj_name: str | None, method: str) -> None:
         if method not in _PICKLE_NAMES:
             return
         if obj_name not in self._pickle_names and obj_name not in (
@@ -435,9 +429,7 @@ class _SecurityVisitor(ast.NodeVisitor):
             "arbitrary code. Use a safe format such as JSON.",
         )
 
-    def _check_yaml_call(
-        self, node: ast.Call, obj_name: str | None, method: str
-    ) -> None:
+    def _check_yaml_call(self, node: ast.Call, obj_name: str | None, method: str) -> None:
         if method != "load":
             return
         if obj_name not in self._yaml_names and obj_name != "yaml":
@@ -453,9 +445,7 @@ class _SecurityVisitor(ast.NodeVisitor):
             )
 
     # ------------------------------------------------------------------ B203: Weak Crypto
-    def _check_hashlib_call(
-        self, node: ast.Call, obj_name: str | None, method: str
-    ) -> None:
+    def _check_hashlib_call(self, node: ast.Call, obj_name: str | None, method: str) -> None:
         if method not in _WEAK_HASH_NAMES:
             return
         if obj_name not in self._hashlib_names and obj_name != "hashlib":
@@ -557,8 +547,16 @@ class SecurityScanner:
             All findings across every scanned file.
         """
         _SKIP_DIRS = frozenset(
-            {".git", "__pycache__", ".pytest_cache", ".venv", "venv", "node_modules",
-             "fixproof_adv", ".mypy_cache"}
+            {
+                ".git",
+                "__pycache__",
+                ".pytest_cache",
+                ".venv",
+                "venv",
+                "node_modules",
+                "fixproof_adv",
+                ".mypy_cache",
+            }
         )
 
         findings: list[VulnerabilityFinding] = []
@@ -612,7 +610,9 @@ class SecurityScanner:
 
         return SecurityScanResult(
             passed=len(new_vulns) == 0,
-            new_vulnerabilities=sorted(new_vulns, key=lambda v: _SEVERITY_RANK[v.severity], reverse=True),
+            new_vulnerabilities=sorted(
+                new_vulns, key=lambda v: _SEVERITY_RANK[v.severity], reverse=True
+            ),
             all_post_patch_findings=post_patch,
             baseline_count=len([f for f in baseline if f.is_actionable()]),
             post_patch_count=len(actionable_post),

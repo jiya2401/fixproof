@@ -58,10 +58,13 @@ def make_cert(verdict: VerificationVerdict = VerificationVerdict.VERIFIED) -> Fi
         selected_attempt=1,
         iterations=[
             IterationRecord(
-                index=1, rationale="Invert the comparison.",
+                index=1,
+                rationale="Invert the comparison.",
                 test_results={
-                    "refresh_token_accepted": "passed", "access_token_rejected": "passed",
-                    "flaky_attack": "failed", "excluded_by_human": "passed",
+                    "refresh_token_accepted": "passed",
+                    "access_token_rejected": "passed",
+                    "flaky_attack": "failed",
+                    "excluded_by_human": "passed",
                 },
             )  # fmt: skip
         ],

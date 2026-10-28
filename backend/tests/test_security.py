@@ -56,7 +56,10 @@ class TestB101SqlInjection:
         b101 = [f for f in findings if f.rule_id == "B101"]
         assert b101, "Expected B101 for f-string in execute()"
         assert b101[0].severity == "HIGH"
-        assert "SQL injection" in b101[0].issue_description.lower() or "sql" in b101[0].issue_description.lower()
+        assert (
+            "SQL injection" in b101[0].issue_description.lower()
+            or "sql" in b101[0].issue_description.lower()
+        )
 
     def test_format_in_execute(self, tmp_path: Path) -> None:
         code = (
@@ -69,8 +72,7 @@ class TestB101SqlInjection:
 
     def test_percent_format_in_execute(self, tmp_path: Path) -> None:
         code = (
-            "def run(cursor, name):\n"
-            "    cursor.execute('SELECT * FROM t WHERE name = %s' % name)\n"
+            "def run(cursor, name):\n    cursor.execute('SELECT * FROM t WHERE name = %s' % name)\n"
         )
         findings = scan_code(tmp_path, code)
         b101 = [f for f in findings if f.rule_id == "B101"]
@@ -86,10 +88,7 @@ class TestB101SqlInjection:
         assert not b101, "Parameterised query should not trigger B101"
 
     def test_constant_string_in_execute_is_clean(self, tmp_path: Path) -> None:
-        code = (
-            "def run(cursor):\n"
-            "    cursor.execute('SELECT 1')\n"
-        )
+        code = "def run(cursor):\n    cursor.execute('SELECT 1')\n"
         findings = scan_code(tmp_path, code)
         b101 = [f for f in findings if f.rule_id == "B101"]
         assert not b101, "Constant SQL should not trigger B101"
@@ -102,56 +101,38 @@ class TestB101SqlInjection:
 
 class TestB102CommandInjection:
     def test_subprocess_run_shell_true_dynamic(self, tmp_path: Path) -> None:
-        code = (
-            "import subprocess\n"
-            "def run(cmd):\n"
-            "    subprocess.run(cmd, shell=True)\n"
-        )
+        code = "import subprocess\ndef run(cmd):\n    subprocess.run(cmd, shell=True)\n"
         findings = scan_code(tmp_path, code)
         b102 = [f for f in findings if f.rule_id == "B102"]
         assert b102, "Expected B102 for subprocess.run(cmd, shell=True)"
         assert b102[0].severity == "HIGH"
 
     def test_subprocess_popen_shell_true_dynamic(self, tmp_path: Path) -> None:
-        code = (
-            "import subprocess\n"
-            "def run(user_cmd):\n"
-            "    subprocess.Popen(user_cmd, shell=True)\n"
-        )
+        code = "import subprocess\ndef run(user_cmd):\n    subprocess.Popen(user_cmd, shell=True)\n"
         findings = scan_code(tmp_path, code)
         b102 = [f for f in findings if f.rule_id == "B102"]
         assert b102
 
     def test_os_system_dynamic(self, tmp_path: Path) -> None:
-        code = (
-            "import os\n"
-            "def run(cmd):\n"
-            "    os.system(cmd)\n"
-        )
+        code = "import os\ndef run(cmd):\n    os.system(cmd)\n"
         findings = scan_code(tmp_path, code)
         b102 = [f for f in findings if f.rule_id == "B102"]
         assert b102, "Expected B102 for os.system(dynamic)"
         assert b102[0].severity == "HIGH"
 
     def test_subprocess_shell_false_is_clean(self, tmp_path: Path) -> None:
-        code = (
-            "import subprocess\n"
-            "def run(args):\n"
-            "    subprocess.run(args, shell=False)\n"
-        )
+        code = "import subprocess\ndef run(args):\n    subprocess.run(args, shell=False)\n"
         findings = scan_code(tmp_path, code)
         b102 = [f for f in findings if f.rule_id == "B102"]
         assert not b102, "shell=False should not trigger B102"
 
     def test_subprocess_constant_cmd_shell_true_is_clean(self, tmp_path: Path) -> None:
-        code = (
-            "import subprocess\n"
-            "def run():\n"
-            "    subprocess.run('ls -la', shell=True)\n"
-        )
+        code = "import subprocess\ndef run():\n    subprocess.run('ls -la', shell=True)\n"
         findings = scan_code(tmp_path, code)
         b102 = [f for f in findings if f.rule_id == "B102"]
-        assert not b102, "Constant command with shell=True is flagged by Bandit but we keep it clean"
+        assert not b102, (
+            "Constant command with shell=True is flagged by Bandit but we keep it clean"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -182,21 +163,13 @@ class TestB103PathTraversal:
         assert b103, "Expected B103 for open() with + concatenation"
 
     def test_path_fstring(self, tmp_path: Path) -> None:
-        code = (
-            "from pathlib import Path\n"
-            "def get(name):\n"
-            "    return Path(f'/base/{name}')\n"
-        )
+        code = "from pathlib import Path\ndef get(name):\n    return Path(f'/base/{name}')\n"
         findings = scan_code(tmp_path, code)
         b103 = [f for f in findings if f.rule_id == "B103"]
         assert b103, "Expected B103 for Path() with f-string"
 
     def test_open_constant_path_is_clean(self, tmp_path: Path) -> None:
-        code = (
-            "def read():\n"
-            "    with open('/etc/hosts') as f:\n"
-            "        return f.read()\n"
-        )
+        code = "def read():\n    with open('/etc/hosts') as f:\n        return f.read()\n"
         findings = scan_code(tmp_path, code)
         b103 = [f for f in findings if f.rule_id == "B103"]
         assert not b103, "Constant path should not trigger B103"
@@ -234,10 +207,7 @@ class TestB201HardcodedSecret:
         assert not b201, "Empty string should not trigger B201 (too trivial)"
 
     def test_env_lookup_is_clean(self, tmp_path: Path) -> None:
-        code = (
-            "import os\n"
-            "password = os.environ.get('PASSWORD')\n"
-        )
+        code = "import os\npassword = os.environ.get('PASSWORD')\n"
         findings = scan_code(tmp_path, code)
         b201 = [f for f in findings if f.rule_id == "B201"]
         assert not b201, "Environment lookup should not trigger B201"
@@ -250,43 +220,27 @@ class TestB201HardcodedSecret:
 
 class TestB202UnsafeDeserialization:
     def test_pickle_loads(self, tmp_path: Path) -> None:
-        code = (
-            "import pickle\n"
-            "def load(data):\n"
-            "    return pickle.loads(data)\n"
-        )
+        code = "import pickle\ndef load(data):\n    return pickle.loads(data)\n"
         findings = scan_code(tmp_path, code)
         b202 = [f for f in findings if f.rule_id == "B202"]
         assert b202, "Expected B202 for pickle.loads()"
         assert b202[0].severity == "HIGH"
 
     def test_yaml_load_no_loader(self, tmp_path: Path) -> None:
-        code = (
-            "import yaml\n"
-            "def parse(s):\n"
-            "    return yaml.load(s)\n"
-        )
+        code = "import yaml\ndef parse(s):\n    return yaml.load(s)\n"
         findings = scan_code(tmp_path, code)
         b202 = [f for f in findings if f.rule_id == "B202"]
         assert b202, "Expected B202 for yaml.load() without Loader"
         assert b202[0].severity == "MEDIUM"
 
     def test_yaml_safe_load_is_clean(self, tmp_path: Path) -> None:
-        code = (
-            "import yaml\n"
-            "def parse(s):\n"
-            "    return yaml.safe_load(s)\n"
-        )
+        code = "import yaml\ndef parse(s):\n    return yaml.safe_load(s)\n"
         findings = scan_code(tmp_path, code)
         b202 = [f for f in findings if f.rule_id == "B202"]
         assert not b202, "yaml.safe_load() should not trigger B202"
 
     def test_yaml_load_with_safe_loader_is_clean(self, tmp_path: Path) -> None:
-        code = (
-            "import yaml\n"
-            "def parse(s):\n"
-            "    return yaml.load(s, Loader=yaml.SafeLoader)\n"
-        )
+        code = "import yaml\ndef parse(s):\n    return yaml.load(s, Loader=yaml.SafeLoader)\n"
         findings = scan_code(tmp_path, code)
         b202 = [f for f in findings if f.rule_id == "B202"]
         assert not b202, "yaml.load(Loader=SafeLoader) should not trigger B202"
@@ -299,31 +253,21 @@ class TestB202UnsafeDeserialization:
 
 class TestB203WeakCrypto:
     def test_hashlib_md5(self, tmp_path: Path) -> None:
-        code = (
-            "import hashlib\n"
-            "def hash_it(s):\n"
-            "    return hashlib.md5(s.encode()).hexdigest()\n"
-        )
+        code = "import hashlib\ndef hash_it(s):\n    return hashlib.md5(s.encode()).hexdigest()\n"
         findings = scan_code(tmp_path, code)
         b203 = [f for f in findings if f.rule_id == "B203"]
         assert b203, "Expected B203 for hashlib.md5()"
         assert b203[0].severity == "MEDIUM"
 
     def test_hashlib_sha1(self, tmp_path: Path) -> None:
-        code = (
-            "import hashlib\n"
-            "def hash_it(s):\n"
-            "    return hashlib.sha1(s.encode()).hexdigest()\n"
-        )
+        code = "import hashlib\ndef hash_it(s):\n    return hashlib.sha1(s.encode()).hexdigest()\n"
         findings = scan_code(tmp_path, code)
         b203 = [f for f in findings if f.rule_id == "B203"]
         assert b203, "Expected B203 for hashlib.sha1()"
 
     def test_hashlib_sha256_is_clean(self, tmp_path: Path) -> None:
         code = (
-            "import hashlib\n"
-            "def hash_it(s):\n"
-            "    return hashlib.sha256(s.encode()).hexdigest()\n"
+            "import hashlib\ndef hash_it(s):\n    return hashlib.sha256(s.encode()).hexdigest()\n"
         )
         findings = scan_code(tmp_path, code)
         b203 = [f for f in findings if f.rule_id == "B203"]
@@ -414,7 +358,11 @@ class TestBaselineComparison:
             file="auth.py", line_number=5, issue_description="old", severity="HIGH", rule_id="B201"
         )
         new_vuln = VulnerabilityFinding(
-            file="auth.py", line_number=10, issue_description="new sql", severity="HIGH", rule_id="B101"
+            file="auth.py",
+            line_number=10,
+            issue_description="new sql",
+            severity="HIGH",
+            rule_id="B101",
         )
         result = self._scanner().compare([existing], [existing, new_vuln])
         assert not result.passed
@@ -423,7 +371,11 @@ class TestBaselineComparison:
 
     def test_new_medium_finding_fails(self, tmp_path: Path) -> None:
         new_vuln = VulnerabilityFinding(
-            file="utils.py", line_number=3, issue_description="md5 usage", severity="MEDIUM", rule_id="B203"
+            file="utils.py",
+            line_number=3,
+            issue_description="md5 usage",
+            severity="MEDIUM",
+            rule_id="B203",
         )
         result = self._scanner().compare([], [new_vuln])
         assert not result.passed
@@ -431,7 +383,11 @@ class TestBaselineComparison:
 
     def test_low_severity_does_not_fail(self, tmp_path: Path) -> None:
         low = VulnerabilityFinding(
-            file="utils.py", line_number=3, issue_description="low risk", severity="LOW", rule_id="B999"
+            file="utils.py",
+            line_number=3,
+            issue_description="low risk",
+            severity="LOW",
+            rule_id="B999",
         )
         result = self._scanner().compare([], [low])
         assert result.passed, "LOW severity should not fail the security gate"
@@ -439,7 +395,11 @@ class TestBaselineComparison:
 
     def test_pre_existing_finding_not_counted_as_new(self, tmp_path: Path) -> None:
         f = VulnerabilityFinding(
-            file="auth.py", line_number=5, issue_description="pre-existing", severity="HIGH", rule_id="B101"
+            file="auth.py",
+            line_number=5,
+            issue_description="pre-existing",
+            severity="HIGH",
+            rule_id="B101",
         )
         result = self._scanner().compare([f], [f])
         assert result.passed
@@ -486,7 +446,8 @@ class TestComparativeScan:
         write_py(
             workspace,
             "db.py",
-            "def query(cursor, user_id):\n    cursor.execute(f'SELECT * FROM t WHERE id={user_id}')\n",
+            "def query(cursor, user_id):\n"
+            "    cursor.execute(f'SELECT * FROM t WHERE id={user_id}')\n",
         )
         scanner = SecurityScanner()
         result, _ = scanner.run_comparative_scan(
@@ -550,4 +511,3 @@ class TestVulnerabilityFindingModel:
         assert high.is_actionable()
         assert medium.is_actionable()
         assert not low.is_actionable()
-

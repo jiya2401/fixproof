@@ -906,9 +906,7 @@ class RepairPipeline:
         if selected_sast is not None:
             cert.security_verified = selected_sast.passed
             cert.security_seal = (
-                "Verified Secure"
-                if selected_sast.passed
-                else "SECURITY COMPROMISED"
+                "Verified Secure" if selected_sast.passed else "SECURITY COMPROMISED"
             )
 
         # ---- Feature 3: Visual Explanations - generate "Why I Fixed It" before sealing ----
@@ -917,17 +915,11 @@ class RepairPipeline:
                 from app.explanation import generate_explanation
 
                 # Collect the best traceback from the reproduction check
-                repro_check = next(
-                    (c for c in checks if c.name == "reproduction_red"), None
-                )
-                traceback_text = (
-                    repro_check.output_excerpt if repro_check else ""
-                ) or ""
+                repro_check = next((c for c in checks if c.name == "reproduction_red"), None)
+                traceback_text = (repro_check.output_excerpt if repro_check else "") or ""
                 # Collect a snapshot of the pre-patch code (stored in focus text)
                 buggy_code_snapshot = self._focus_text or ""
-                llm_client = (
-                    getattr(self, "_explanation_llm_client", None)
-                )  # injectable for tests
+                llm_client = getattr(self, "_explanation_llm_client", None)  # injectable for tests
                 cert.explanation = generate_explanation(
                     buggy_code_snapshot,
                     traceback_text,
@@ -936,9 +928,8 @@ class RepairPipeline:
                 )
             except Exception as _exc:  # noqa: BLE001 — never fatal
                 import logging as _logging
-                _logging.getLogger(__name__).warning(
-                    "explanation hook failed: %s", _exc
-                )
+
+                _logging.getLogger(__name__).warning("explanation hook failed: %s", _exc)
 
         if self.on_event:
             self.on_event("completed", f"verdict: {cert.verdict.value}")

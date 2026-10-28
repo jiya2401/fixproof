@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import json
 from unittest.mock import MagicMock, patch
-from pydantic import ValidationError
 
 import pytest
+from pydantic import ValidationError
 
 from app.explanation import (
     EXPLANATION_FALLBACK,
@@ -30,10 +30,7 @@ from app.explanation import (
 # ---------------------------------------------------------------------------
 
 BUGGY_CODE = "def divide(a, b):\n    return a / b\n"
-TRACEBACK = (
-    "FAILED test_divide.py::test_zero_division\n"
-    "ZeroDivisionError: division by zero\n"
-)
+TRACEBACK = "FAILED test_divide.py::test_zero_division\nZeroDivisionError: division by zero\n"
 PATCH_DIFF = (
     "--- a/divide.py\n"
     "+++ b/divide.py\n"
@@ -47,9 +44,19 @@ PATCH_DIFF = (
 
 VALID_LLM_JSON = json.dumps(
     {
-        "root_cause": "The function divided by zero without a guard. Python raises ZeroDivisionError.",
-        "the_fix": "A ValueError guard was added before the division. This replaces the implicit error with an explicit contract.",
-        "technical_keywords": ["ZeroDivisionError", "input validation", "guard clause", "defensive programming"],
+        "root_cause": (
+            "The function divided by zero without a guard. Python raises ZeroDivisionError."
+        ),
+        "the_fix": (
+            "A ValueError guard was added before the division. "
+            "This replaces the implicit error with an explicit contract."
+        ),
+        "technical_keywords": [
+            "ZeroDivisionError",
+            "input validation",
+            "guard clause",
+            "defensive programming",
+        ],
     }
 )
 
@@ -100,9 +107,7 @@ class TestFixExplanation:
         assert len(exp.technical_keywords) >= 2
 
     def test_model_dump_round_trip(self) -> None:
-        exp = FixExplanation(
-            root_cause="rc", the_fix="fx", technical_keywords=["a", "b"]
-        )
+        exp = FixExplanation(root_cause="rc", the_fix="fx", technical_keywords=["a", "b"])
         d = exp.model_dump()
         assert set(d.keys()) == {"root_cause", "the_fix", "technical_keywords"}
         exp2 = FixExplanation.model_validate(d)
@@ -400,4 +405,3 @@ class TestFixCertificateExplanationField:
         cert = FixCertificate(issue="test", explanation=exp)
         dumped = cert.model_dump()
         assert "explanation" in dumped
-
