@@ -1,13 +1,24 @@
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, HttpUrl
 
 from app.certificate import FixCertificate, IterationRecord, TimelineEvent
 from app.config import get_settings
 from app.evaluation import load_cases
+from app.github_pr import (
+    PullRequestError,
+    PullRequestResult,
+    ensure_eligible,
+    parse_repository,
+    publish_pull_request,
+    repository_from_project,
+    validate_base_branch,
+    validate_token,
+)
 from app.llm.nebius import NebiusConfigurationError
 from app.orchestrator.state import InvestigationStage, InvestigationState
 from app.pipeline import factory
@@ -60,6 +71,12 @@ class LocalProjectRequest(BaseModel):
     path: str
 
 
+class PullRequestRequest(BaseModel):
+    # "owner/repo" or a github.com URL. Defaults to the project's own GitHub origin.
+    repository: str | None = None
+    base_branch: str | None = None  # defaults to the repository's default branch
+
+
 def _store() -> ProjectStore:
     return ProjectStore()
 
@@ -77,6 +94,7 @@ def about() -> dict[str, Any]:
         "target_scope": "Python + pytest projects whose dependencies are in the sandbox image",
         "nebius_model": settings.nebius_model,
         "nebius_configured": bool(settings.nebius_api_key),
+        "github_configured": bool(settings.github_token),
         "sandbox_mode": settings.sandbox_mode,
         "example_cases": sorted(EXAMPLE_CASES),
         "example_issues": EXAMPLE_ISSUES,
@@ -94,6 +112,7 @@ def about() -> dict[str, Any]:
             "spec-grounded adversarial tests executed in sandbox",
             "bounded repair loop with counterexample feedback",
             "verdict policy v1 + sealed Fix Certificate",
+            "open a GitHub pull request for a verified patch",
         ],
         "not_implemented": [
             "hypothesis experiments",
@@ -376,6 +395,64 @@ def get_certificate(investigation_id: str) -> FixCertificate:
     if state.certificate is None:
         raise HTTPException(status_code=404, detail="No certificate yet")
     return state.certificate
+
+
+# ---------------------------------------------------------------- GitHub pull request
+
+_PR_IN_PROGRESS: set[str] = set()  # blocks a double-click from racing itself
+
+
+@router.post("/investigations/{investigation_id}/pull-request", response_model=PullRequestResult)
+def create_pull_request(
+    investigation_id: str,
+    payload: PullRequestRequest,
+    x_github_token: str | None = Header(default=None),
+) -> Any:
+    """Open a GitHub PR for a *verified* patch: branch fixproof/patch-<id>, strict apply, commit,
+    push, PR with root cause, fix summary and the attack tests that passed.
+
+    The token comes from the X-GitHub-Token header (kept in memory, never stored or logged) or
+    FIXPROOF_GITHUB_TOKEN. Failures return {detail, code, details} with a stable `code`.
+    """
+    state = _get(investigation_id)
+    cert = state.certificate
+    if cert is None or state.stage != InvestigationStage.COMPLETED:
+        raise HTTPException(status_code=409, detail="Only a completed investigation has a patch")
+    if investigation_id in _PR_IN_PROGRESS:
+        raise HTTPException(status_code=409, detail="A pull request is already being created")
+    _PR_IN_PROGRESS.add(investigation_id)
+    try:
+        ensure_eligible(cert)
+        token = validate_token(x_github_token or get_settings().github_token)
+        if payload.repository and payload.repository.strip():
+            owner, name = parse_repository(payload.repository)
+        else:
+            origin = None
+            if state.project_id:
+                info, _ = _project(state.project_id)
+                origin = repository_from_project(info.origin, info.origin_detail)
+            if origin is None:
+                raise PullRequestError(
+                    "REPOSITORY_REQUIRED",
+                    "Enter the GitHub repository to open the pull request against "
+                    "(this run is not tied to a GitHub clone).",
+                    422,
+                )
+            owner, name, _ref = origin
+        return publish_pull_request(
+            cert,
+            token=token,
+            owner=owner,
+            name=name,
+            base_branch=validate_base_branch(payload.base_branch),
+        )
+    except PullRequestError as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.message, "code": exc.code, "details": exc.details},
+        )
+    finally:
+        _PR_IN_PROGRESS.discard(investigation_id)
 
 
 # ---------------------------------------------------------------- benchmark results

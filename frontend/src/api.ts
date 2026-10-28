@@ -144,6 +144,7 @@ export type AboutResponse = {
   status: string
   nebius_model: string
   nebius_configured: boolean
+  github_configured: boolean
   sandbox_mode: string
   example_cases: string[]
   example_issues: Record<string, string>
@@ -194,6 +195,16 @@ export type BenchmarkResponse =
       }
     }
 
+/** An API failure. `code` is the backend's stable error code when it sent one. */
+export class ApiError extends Error {
+  code?: string
+  constructor(message: string, code?: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.code = code
+  }
+}
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response
   try {
@@ -207,7 +218,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     const text = Array.isArray(detail)
       ? detail.map((d: { msg?: string }) => d.msg).join('; ')
       : (detail ?? `Request failed (${response.status})`)
-    throw new Error(String(text))
+    throw new ApiError(String(text), typeof body.code === 'string' ? body.code : undefined)
   }
   return response.status === 204 ? (undefined as T) : response.json()
 }
@@ -263,3 +274,33 @@ export async function reverifyInvestigation(
   )
   return reply.investigation_id
 }
+
+export type PullRequestResult = {
+  number: number
+  url: string
+  branch: string
+  base: string
+  patch_id: string
+  commit_sha: string | null
+  files_changed: { path: string; change: string }[]
+  mergeable: boolean | null // null: GitHub is still computing it
+  warning: string | null
+  reused: boolean // an open PR for this certificate already existed
+}
+
+/** Opens a GitHub PR for a verified patch. The token travels in a header and is never stored. */
+export const createPullRequest = (
+  id: string,
+  args: { repository?: string; baseBranch?: string; token?: string },
+) =>
+  call<PullRequestResult>(`/api/v1/investigations/${id}/pull-request`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(args.token ? { 'X-GitHub-Token': args.token } : {}),
+    },
+    body: JSON.stringify({
+      repository: args.repository || null,
+      base_branch: args.baseBranch || null,
+    }),
+  })

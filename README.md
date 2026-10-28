@@ -70,6 +70,20 @@ standard library plus the packages in `backend/sandbox-image/extra-requirements.
 editing it). Missing imports are detected and reported. Projects with a `src/` layout are supported.
 Attack tests must quote your issue, docstrings or README, so write the expected behavior down.
 
+## Open a pull request
+
+When the verdict is **Verified** or **Verified with conditions**, the certificate page offers **Create Pull
+Request**. FixProof creates `fixproof/patch-<id>`, applies the patch with the same strict `git apply` the
+pipeline uses, commits, pushes and opens a PR against the base branch (default: the repository's default
+branch). The description holds the root cause, a short fix summary, a table of the attack tests that passed,
+and the verification evidence. Everything goes through the GitHub API, so nothing is cloned or pushed locally.
+
+Set `FIXPROOF_GITHUB_TOKEN` on the backend, or paste a token in the UI (sent in an `X-GitHub-Token` header for
+that request only, never stored). A fine-grained token needs **Contents** and **Pull requests** read/write on the
+target repository. Failures return a stable `code` (`TOKEN_EXPIRED`, `PATCH_CONFLICT`, `BRANCH_CONFLICT`,
+`RATE_LIMITED`, `INSUFFICIENT_PERMISSIONS`, ...). If the base branch changed so the patch no longer applies, you
+get `PATCH_CONFLICT` instead of a guessed merge. Publishing the same certificate twice returns the open PR.
+
 ## What the model does vs. what tools do
 
 | Step | Who |

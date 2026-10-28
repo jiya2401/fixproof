@@ -146,6 +146,8 @@ export default function App() {
             )}
             {step === 'result' && cert && (
               <CertificateView cert={cert} onReset={reset} investigationId={investigationId ?? undefined}
+                githubConfigured={about?.github_configured ?? false}
+                project={source?.kind === 'project' ? source.info : null}
                 onReverify={(newId) => { setCert(null); setInvestigationId(newId); setStep('run') }} />
             )}
           </>

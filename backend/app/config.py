@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     allow_unsafe_local_execution: bool = Field(
         default=False, alias="FIXPROOF_ALLOW_UNSAFE_LOCAL_EXECUTION"
     )
+    # Optional server-side token for opening pull requests; the UI can also send one per request.
+    github_token: str | None = Field(default=None, alias="FIXPROOF_GITHUB_TOKEN")
 
     nebius_api_key: str | None = Field(default=None, alias="NEBIUS_API_KEY")
     nebius_base_url: str = Field(
