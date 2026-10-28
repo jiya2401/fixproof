@@ -18,7 +18,8 @@ the ``"fail"`` events of the same test.
 Example NDJSON::
 
     {"Action":"run","Package":"example.com/pkg","Test":"TestAdd"}
-    {"Action":"output","Package":"example.com/pkg","Test":"TestAdd","Output":"    math_test.go:12: expected 1 got 0\\n"}
+    {"Action":"output","Package":"example.com/pkg","Test":"TestAdd",
+     "Output":"    math_test.go:12: expected 1 got 0\\n"}
     {"Action":"fail","Package":"example.com/pkg","Test":"TestAdd","Elapsed":0.001}
     {"Action":"pass","Package":"example.com/pkg","Test":"TestMul","Elapsed":0.000}
     {"Action":"fail","Package":"example.com/pkg","Elapsed":0.005}
@@ -109,7 +110,8 @@ def parse_gotest_json(stdout: str, *, raw_output: str = "") -> TestRunResult:
 
     # ------------------------------------------------------------------ counts
     total = len(ran)
-    passed_count = len(passed - failed)   # a test that passes after failing is unusual but handle it
+    # a test that passes after failing is unusual but handle it
+    passed_count = len(passed - failed)
     failed_count = len(failed)
     # skipped tests are not counted in total by Go's convention
     # (go test reports them separately; they inflate 'ran' so we subtract)

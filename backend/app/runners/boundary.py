@@ -22,7 +22,6 @@ import fnmatch
 from dataclasses import dataclass, field
 from pathlib import Path
 
-
 # ---------------------------------------------------------------------------
 # Lock patterns — files matching ANY of these are always locked
 # ---------------------------------------------------------------------------

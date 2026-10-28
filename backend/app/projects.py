@@ -194,7 +194,6 @@ class ProjectStore:
             # Detect language and relax the Python-only guard for JS/Go projects.
             from app.runners.detector import detect_language  # local import avoids circular dep
             info.language = str(detect_language(src))
-            is_python = info.language == "python"
             has_go_mod = (src / "go.mod").exists()
             has_pkg_json = (src / "package.json").exists()
             if info.python_files == 0 and not has_go_mod and not has_pkg_json:

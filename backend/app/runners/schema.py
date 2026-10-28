@@ -102,12 +102,12 @@ class TestRunResult:
         }
 
     @classmethod
-    def timed_out_result(cls, raw_output: str = "") -> "TestRunResult":
+    def timed_out_result(cls, raw_output: str = "") -> TestRunResult:
         """Convenience constructor for a timeout outcome."""
         return cls(timed_out=True, raw_output=raw_output)
 
     @classmethod
-    def error_result(cls, message: str, raw_output: str = "") -> "TestRunResult":
+    def error_result(cls, message: str, raw_output: str = "") -> TestRunResult:
         """Convenience constructor for an infrastructure error outcome."""
         return cls(errors=1, raw_output=raw_output, failures=[FailureDetail("(setup)", message)])
 

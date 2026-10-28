@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -329,8 +329,18 @@ def _gotest_ndjson(events: list[dict]) -> str:
 GOTEST_ALL_PASS_NDJSON = _gotest_ndjson([
     {"Action": "run", "Package": "example.com/pkg", "Test": "TestAdd"},
     {"Action": "run", "Package": "example.com/pkg", "Test": "TestMul"},
-    {"Action": "output", "Package": "example.com/pkg", "Test": "TestAdd", "Output": "--- PASS: TestAdd (0.00s)\n"},
-    {"Action": "output", "Package": "example.com/pkg", "Test": "TestMul", "Output": "--- PASS: TestMul (0.00s)\n"},
+    {
+        "Action": "output",
+        "Package": "example.com/pkg",
+        "Test": "TestAdd",
+        "Output": "--- PASS: TestAdd (0.00s)\n",
+    },
+    {
+        "Action": "output",
+        "Package": "example.com/pkg",
+        "Test": "TestMul",
+        "Output": "--- PASS: TestMul (0.00s)\n",
+    },
     {"Action": "pass", "Package": "example.com/pkg", "Test": "TestAdd", "Elapsed": 0.001},
     {"Action": "pass", "Package": "example.com/pkg", "Test": "TestMul", "Elapsed": 0.001},
     {"Action": "pass", "Package": "example.com/pkg", "Elapsed": 0.005},
@@ -339,11 +349,25 @@ GOTEST_ALL_PASS_NDJSON = _gotest_ndjson([
 GOTEST_WITH_FAILURE_NDJSON = _gotest_ndjson([
     {"Action": "run", "Package": "example.com/pkg", "Test": "TestAdd"},
     {"Action": "run", "Package": "example.com/pkg", "Test": "TestMul"},
-    {"Action": "output", "Package": "example.com/pkg", "Test": "TestAdd",
-     "Output": "    math_test.go:12: expected 1 got 0\n"},
-    {"Action": "output", "Package": "example.com/pkg", "Test": "TestAdd", "Output": "--- FAIL: TestAdd (0.00s)\n"},
+    {
+        "Action": "output",
+        "Package": "example.com/pkg",
+        "Test": "TestAdd",
+        "Output": "    math_test.go:12: expected 1 got 0\n",
+    },
+    {
+        "Action": "output",
+        "Package": "example.com/pkg",
+        "Test": "TestAdd",
+        "Output": "--- FAIL: TestAdd (0.00s)\n",
+    },
     {"Action": "fail", "Package": "example.com/pkg", "Test": "TestAdd", "Elapsed": 0.001},
-    {"Action": "output", "Package": "example.com/pkg", "Test": "TestMul", "Output": "--- PASS: TestMul (0.00s)\n"},
+    {
+        "Action": "output",
+        "Package": "example.com/pkg",
+        "Test": "TestMul",
+        "Output": "--- PASS: TestMul (0.00s)\n",
+    },
     {"Action": "pass", "Package": "example.com/pkg", "Test": "TestMul", "Elapsed": 0.001},
     {"Action": "fail", "Package": "example.com/pkg", "Elapsed": 0.005},
 ])
@@ -469,8 +493,8 @@ class TestJSRunner:
         assert result.failed == 2
 
     def test_timed_out_result(self, tmp_path):
-        from app.sandbox.base import CommandResult
         from app.runners.js_runner import JSRunner
+        from app.sandbox.base import CommandResult
 
         sandbox = MagicMock()
         sandbox.run.return_value = CommandResult(
@@ -520,8 +544,8 @@ class TestGoRunner:
         assert result.failed == 1
 
     def test_timed_out_result(self, tmp_path):
-        from app.sandbox.base import CommandResult
         from app.runners.go_runner import GoRunner
+        from app.sandbox.base import CommandResult
 
         sandbox = MagicMock()
         sandbox.run.return_value = CommandResult(
@@ -600,7 +624,7 @@ class TestProjectStoreMultiLang:
 
     def test_js_stub_accepted(self, tmp_path):
         """A project with only package.json + .ts files must not raise ProjectError."""
-        from app.projects import ProjectError, ProjectInfo, ProjectStore
+        from app.projects import ProjectInfo, ProjectStore
 
         store_root = tmp_path / "store"
         store = ProjectStore(root=store_root)
