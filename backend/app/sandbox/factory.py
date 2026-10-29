@@ -10,32 +10,23 @@ def get_sandbox() -> SandboxRunner:
     """Instantiate the configured sandbox runner based on FIXPROOF_SANDBOX_MODE.
 
     Supported modes:
-    - 'bwrap':  bubblewrap Linux user-namespace sandbox (mount, net, pid, ipc isolation).
-                Recommended for Render and containerized cloud runtimes (no Docker daemon needed).
-    - 'docker': Docker container sandbox (requires Docker CLI and a running Docker daemon).
-    - 'local':  Process sandbox with rlimits (strictly for local development/CI).
+    - 'local':  Process sandbox with rlimits (used for Render deployment and local dev).
                 Requires FIXPROOF_ALLOW_UNSAFE_LOCAL_EXECUTION=true.
+    - 'docker': Docker container sandbox (requires Docker CLI and running Docker daemon).
+    - 'bwrap':  bubblewrap Linux user-namespace sandbox (requires Linux host supporting user namespaces).
 
     There is NO silent fallback between modes: untrusted code will never run without
-    the expected security boundary.
+    the configured security boundary.
     """
     mode = get_settings().sandbox_mode.strip().lower()
 
-    if mode == "bwrap":
-        from app.sandbox.bwrap import BwrapSandbox, BwrapUnavailable
+    if mode == "local":
+        from app.sandbox.local import LocalSandbox, UnsafeLocalExecutionDisabled
 
         try:
-            sandbox = BwrapSandbox()
-        except BwrapUnavailable as exc:
-            raise SandboxUnavailable(f"bubblewrap sandbox unavailable: {exc}") from exc
-
-        failures = sandbox.self_test()
-        if failures:
-            raise SandboxUnavailable(
-                f"bubblewrap sandbox self-test failed ({', '.join(failures)}). "
-                "Ensure the host kernel supports unprivileged user namespaces."
-            )
-        return sandbox
+            return LocalSandbox()
+        except UnsafeLocalExecutionDisabled as exc:
+            raise SandboxUnavailable(str(exc)) from exc
 
     if mode == "docker":
         from app.sandbox.docker import DockerSandbox, DockerUnavailable
@@ -45,8 +36,8 @@ def get_sandbox() -> SandboxRunner:
         except DockerUnavailable as exc:
             raise SandboxUnavailable(
                 f"Docker sandbox unavailable: {exc}. "
-                "For Render or cloud deployments without a Docker daemon, "
-                "set FIXPROOF_SANDBOX_MODE=bwrap."
+                "For cloud deployments like Render, set FIXPROOF_SANDBOX_MODE=local "
+                "with FIXPROOF_ALLOW_UNSAFE_LOCAL_EXECUTION=true."
             ) from exc
 
         failures = sandbox.self_test()
@@ -57,14 +48,25 @@ def get_sandbox() -> SandboxRunner:
             )
         return sandbox
 
-    if mode == "local":
-        from app.sandbox.local import LocalSandbox, UnsafeLocalExecutionDisabled
+    if mode == "bwrap":
+        from app.sandbox.bwrap import BwrapSandbox, BwrapUnavailable
 
         try:
-            return LocalSandbox()
-        except UnsafeLocalExecutionDisabled as exc:
-            raise SandboxUnavailable(str(exc)) from exc
+            sandbox = BwrapSandbox()
+        except BwrapUnavailable as exc:
+            raise SandboxUnavailable(
+                f"bubblewrap sandbox unavailable: {exc}. "
+                "For cloud platforms that block user namespaces, set FIXPROOF_SANDBOX_MODE=local."
+            ) from exc
+
+        failures = sandbox.self_test()
+        if failures:
+            raise SandboxUnavailable(
+                f"bubblewrap sandbox self-test failed ({', '.join(failures)}). "
+                "Ensure the host kernel supports unprivileged user namespaces."
+            )
+        return sandbox
 
     raise SandboxUnavailable(
-        f"Unsupported FIXPROOF_SANDBOX_MODE '{mode}'. Supported modes: 'bwrap', 'docker', 'local'."
+        f"Unsupported FIXPROOF_SANDBOX_MODE '{mode}'. Supported modes: 'local', 'docker', 'bwrap'."
     )
