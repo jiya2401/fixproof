@@ -5,12 +5,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY requirements.txt requirements-dev.txt ./
+COPY backend/requirements.txt backend/requirements-dev.txt ./
 RUN pip install --no-cache-dir -r requirements.txt -r requirements-dev.txt
 
-COPY app ./app
-COPY tests ./tests
-COPY pyproject.toml ./pyproject.toml
+COPY backend/app ./app
+COPY backend/tests ./tests
+COPY backend/pyproject.toml ./pyproject.toml
+COPY evals /evals
 
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
