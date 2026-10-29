@@ -41,11 +41,18 @@ def _limit_resources() -> None:
         raise RuntimeError("LocalSandbox resource limits require a Unix-like OS.")
 
     os.setsid()
-    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-    resource.setrlimit(resource.RLIMIT_CPU, (120, 120))
-    resource.setrlimit(resource.RLIMIT_AS, (2 * 1024**3, 2 * 1024**3))
-    resource.setrlimit(resource.RLIMIT_FSIZE, (50 * 1024**2, 50 * 1024**2))
-    resource.setrlimit(resource.RLIMIT_NPROC, (512, 512))
+    limits = [
+        (resource.RLIMIT_CORE, (0, 0)),
+        (resource.RLIMIT_CPU, (120, 120)),
+        (resource.RLIMIT_AS, (2 * 1024**3, 2 * 1024**3)),
+        (resource.RLIMIT_FSIZE, (50 * 1024**2, 50 * 1024**2)),
+        (resource.RLIMIT_NPROC, (512, 512)),
+    ]
+    for res, val in limits:
+        try:
+            resource.setrlimit(res, val)
+        except (ValueError, OSError):
+            pass
 
 
 class LocalSandbox(SandboxRunner):

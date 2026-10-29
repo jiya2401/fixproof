@@ -21,5 +21,5 @@ def test_docker_argv_contains_isolation_flags() -> None:
         "--user 65534:65534",
     ):
         assert flag in joined
-    assert "NEBIUS" not in joined and "-v /tmp/ws:/work:rw" in joined
+    assert "NEBIUS" not in joined and f"-v {Path('/tmp/ws')}:/work:rw" in joined
     assert "docker.sock" not in joined
