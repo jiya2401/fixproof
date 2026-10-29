@@ -1,4 +1,4 @@
-"""Evidence-driven repair pipeline.
+﻿"""Evidence-driven repair pipeline.
 
 Model calls (Nemotron): hypotheses, patch, adversarial test authoring.
 Everything else is deterministic: snapshotting, applying patches, running pytest in the
@@ -280,6 +280,8 @@ class RepairPipeline:
             sandbox=self.sandbox.describe(),
             max_iterations=self.max_iterations,
         )
+        from app.runners.detector import detect_language
+        cert.language = str(detect_language(source))
 
         self._sast_results = {}  # reset for each pipeline.run() call
 

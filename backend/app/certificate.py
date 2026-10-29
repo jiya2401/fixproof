@@ -1,4 +1,4 @@
-"""Typed, machine-readable Fix Certificate. Used unchanged by the API and the frontend."""
+﻿"""Typed, machine-readable Fix Certificate. Used unchanged by the API and the frontend."""
 
 import hashlib
 import json
@@ -91,6 +91,7 @@ class FixCertificate(BaseModel):
     snapshot_sha256: str = ""
     issue: str = ""
     reproduction_targets: list[str] = Field(default_factory=list)
+    language: str = "python"
 
     model: ModelInfo = Field(default_factory=ModelInfo)
     sandbox: SandboxInfo = Field(default_factory=SandboxInfo)

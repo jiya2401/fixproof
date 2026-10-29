@@ -21,16 +21,23 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 try:
     from watchdog.events import FileSystemEvent, FileSystemEventHandler
     from watchdog.observers import Observer
+
+    HAS_WATCHDOG = True
 except ImportError:
-    sys.exit(
-        "ERROR: 'watchdog' package is required by sync_worker.py.\n"
-        "Please install it using:\n"
-        "    pip install watchdog\n"
-    )
+    HAS_WATCHDOG = False
+
+    class FileSystemEventHandler:  # type: ignore[no-redef]
+        """Fallback base handler when watchdog is not installed."""
+
+        pass
+
+    FileSystemEvent = Any  # type: ignore[assignment,misc]
+    Observer = None  # type: ignore[assignment,misc]
 
 # Systemic paths and directories to ignore completely
 IGNORE_DIRS: frozenset[str] = frozenset(
@@ -212,7 +219,14 @@ class DebouncedChangeHandler(FileSystemEventHandler):
             print(f"    - {tname}: {first_line[:120]}")
 
 
-def main() -> None:
+def main(args_list: list[str] | None = None) -> None:
+    if not HAS_WATCHDOG:
+        sys.exit(
+            "ERROR: 'watchdog' package is required by sync_worker.py.\n"
+            "Please install it using:\n"
+            "    pip install watchdog"
+        )
+
     parser = argparse.ArgumentParser(
         description="FixProof Live Local File Sync Worker ('Kill Switch')"
     )
@@ -241,7 +255,7 @@ def main() -> None:
         help="Debounce interval in seconds (default: 0.3 = 300ms)",
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(args_list)
 
     watch_path = Path(args.dir).resolve()
     if not watch_path.is_dir():

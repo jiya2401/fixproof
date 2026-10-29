@@ -48,6 +48,7 @@ class FailureDetail:
 
 @dataclass
 class TestRunResult:
+    __test__: bool = False
     """Normalised summary of a test suite execution.
 
     Attributes

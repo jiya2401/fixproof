@@ -90,6 +90,19 @@ class TestSyncWorkerFilter:
         assert sent_payloads[0]["project_id"] == "test12345678"
         assert "x = 1" in sent_payloads[0]["content"]
 
+    def test_missing_watchdog_does_not_crash_import(self):
+        import sync_worker
+
+        assert hasattr(sync_worker, "HAS_WATCHDOG")
+
+    def test_main_exits_with_clear_message_if_watchdog_missing(self, monkeypatch):
+        import sync_worker
+
+        monkeypatch.setattr(sync_worker, "HAS_WATCHDOG", False)
+        with pytest.raises(SystemExit) as exc:
+            sync_worker.main()
+        assert "pip install watchdog" in str(exc.value)
+
 
 # ---------------------------------------------------------------------------
 # 2. POST /api/v1/project/sync Tests
