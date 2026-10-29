@@ -1,0 +1,8 @@
+--- a/slugify.py
++++ b/slugify.py
+@@ -6,4 +6,4 @@
+     - Every run of other characters becomes a single ``-``.
+     - No leading or trailing ``-``; input with no letters or digits gives ``""``.
+     """
+-    return text.lower()
++    return text.lower().replace(" ", "-")

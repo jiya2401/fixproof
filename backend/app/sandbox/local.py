@@ -1,6 +1,11 @@
 import os
-import resource
 import shutil
+
+try:
+    import resource
+except ImportError:
+    resource = None
+
 import signal
 import subprocess
 import sys
@@ -10,10 +15,8 @@ from pathlib import Path
 
 from app.config import get_settings
 from app.sandbox.base import CommandResult, SandboxRunner
+from app.sandbox.common import _IGNORE, MAX_OUTPUT_CHARS
 from app.verification.results import SandboxInfo
-
-MAX_OUTPUT_CHARS = 200_000
-_IGNORE = shutil.ignore_patterns(".git", "__pycache__", ".pytest_cache", ".venv", "node_modules")
 
 
 class UnsafeLocalExecutionDisabled(RuntimeError):
@@ -34,6 +37,9 @@ def _network_namespace_available() -> bool:
 
 
 def _limit_resources() -> None:
+    if resource is None:
+        raise RuntimeError("LocalSandbox resource limits require a Unix-like OS.")
+
     os.setsid()
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     resource.setrlimit(resource.RLIMIT_CPU, (120, 120))
@@ -55,6 +61,11 @@ class LocalSandbox(SandboxRunner):
     """
 
     def __init__(self) -> None:
+        if resource is None:
+            raise UnsafeLocalExecutionDisabled(
+                "LocalSandbox requires a Unix-like OS. Use DockerSandbox on Windows."
+            )
+
         if not get_settings().allow_unsafe_local_execution:
             raise UnsafeLocalExecutionDisabled(
                 "Local target-code execution is disabled. Use an isolated sandbox or set "
@@ -75,7 +86,7 @@ class LocalSandbox(SandboxRunner):
             "LANG": "C.UTF-8",
             "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONHASHSEED": "0",
-            "PYTHONPATH": str(workspace),
+            "PYTHONPATH": os.pathsep.join([str(workspace), str(workspace / "src")]),
         }
 
     def run(self, workspace: Path, command: list[str], timeout_seconds: int = 120) -> CommandResult:

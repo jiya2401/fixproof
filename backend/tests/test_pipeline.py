@@ -70,13 +70,15 @@ def test_baseline_would_accept_the_weak_fix_that_fixproof_rejects(auth_src) -> N
     assert baseline.verdict == VerificationVerdict.INSUFFICIENT_EVIDENCE
 
 
-def test_iteration_budget_is_bounded_and_ends_not_verified(auth_src) -> None:
+def test_repeated_patch_gets_one_warning_then_stops(auth_src) -> None:
     fixer = ScriptedFixer([fixture_text("auth_weak.diff")])
     cert = run(
-        auth_src, fixer, ScriptedPlanner([AUTH_ADVERSARIAL]), ["test_auth.py"], max_iterations=3
+        auth_src, fixer, ScriptedPlanner([AUTH_ADVERSARIAL]), ["test_auth.py"], max_iterations=5
     )
-    # Same patch twice => repeat detected on iteration 2, loop stops early.
-    assert len(cert.iterations) == 2 and "repeated" in cert.iterations[1].note
+    notes = [i.note for i in cert.iterations]
+    assert len(cert.iterations) == 3  # verified once, warned on first repeat, stopped on second
+    assert "repeated" in notes[1] and "stopping" in notes[2]
+    assert "IDENTICAL" in (fixer.calls[2] or "")
     assert cert.verdict == VerificationVerdict.NOT_VERIFIED
 
 
@@ -149,6 +151,7 @@ def test_unparseable_adversarial_test_is_not_a_pass(auth_src) -> None:
 def test_skipped_adversarial_test_is_not_a_pass(auth_src) -> None:
     skipper = AdversarialTest(
         name="skipper", rationale="x",
+        spec_quote="Return True only for refresh tokens",
         code="import pytest\n\ndef test_x():\n    pytest.skip('later')\n",
     )  # fmt: skip
     cert = run(auth_src, ScriptedFixer([fixture_text("auth_correct.diff")]),
@@ -188,3 +191,296 @@ def test_baseline_mode_stops_once_visible_checks_pass(auth_src) -> None:
     fixer = ScriptedFixer([fixture_text("auth_weak.diff"), fixture_text("auth_correct.diff")])
     cert = run(auth_src, fixer, None, ["test_auth.py"], max_iterations=3)
     assert len(cert.iterations) == 1 and len(fixer.calls) == 1
+
+
+# --- spec grounding of model-authored tests ---------------------------------------------------
+
+UNGROUNDED_WHITESPACE = AdversarialTest(
+    name="space_after_colon",
+    rationale="invented whitespace rule",
+    spec_quote="values must not start with a space",  # not in the issue or any docstring
+    code=(
+        "from auth import validate_refresh_token\n\n"
+        "def test_space_after_colon():\n"
+        "    assert validate_refresh_token('refresh: abc123') is False\n"
+    ),
+)
+
+
+def test_ungrounded_failing_test_is_a_condition_not_a_veto_and_not_fed_back(auth_src) -> None:
+    fixer = ScriptedFixer([fixture_text("auth_correct.diff")])
+    planner = ScriptedPlanner([AUTH_ADVERSARIAL, UNGROUNDED_WHITESPACE])
+    cert = run(auth_src, fixer, planner, ["test_auth.py"], max_iterations=3)
+
+    grounded = check(cert, "adversarial", 0)
+    ungrounded = check(cert, "adversarial_ungrounded", 0)
+    assert grounded.outcome == CheckOutcome.PASSED and grounded.tests_executed == 1
+    recorded = {t.name: t for t in cert.adversarial_tests}
+    assert recorded["unknown_token_type"].grounded and recorded["unknown_token_type"].spec_quote
+    assert (
+        not recorded["space_after_colon"].grounded
+        and "def test_" in recorded["space_after_colon"].code
+    )
+    assert ungrounded.outcome == CheckOutcome.FAILED and not ungrounded.required
+    assert len(cert.iterations) == 1 and fixer.calls == [None]  # nothing fed back
+    assert cert.verdict == VerificationVerdict.VERIFIED_WITH_CONDITIONS
+    assert any("adversarial_ungrounded" in r for r in cert.verdict_reasons)
+
+
+def test_grounded_failing_test_still_vetoes_and_shows_its_spec_quote(auth_src) -> None:
+    cert = run(
+        auth_src,
+        ScriptedFixer([fixture_text("auth_weak.diff")]),
+        ScriptedPlanner([AUTH_ADVERSARIAL, UNGROUNDED_WHITESPACE]),
+        ["test_auth.py"],
+        max_iterations=1,
+    )
+    adv = check(cert, "adversarial", 0)
+    assert adv.outcome == CheckOutcome.FAILED
+    assert any('[SPEC: "Return True only for refresh tokens"]' in c for c in adv.counterexamples)
+    assert cert.verdict == VerificationVerdict.NOT_VERIFIED
+
+
+def test_only_ungrounded_tests_means_insufficient_evidence(auth_src) -> None:
+    cert = run(
+        auth_src,
+        ScriptedFixer([fixture_text("auth_correct.diff")]),
+        ScriptedPlanner([UNGROUNDED_WHITESPACE]),
+        ["test_auth.py"],
+        max_iterations=1,
+    )
+    adv = check(cert, "adversarial")
+    assert adv.outcome == CheckOutcome.ERROR and "no spec-grounded" in adv.summary
+    assert cert.verdict == VerificationVerdict.INSUFFICIENT_EVIDENCE
+
+
+# --- planner failures and cumulative feedback ------------------------------------------------
+
+
+class FlakyPlanner:
+    """Succeeds on the first call, then fails like a malformed live Nemotron reply."""
+
+    def __init__(self, tests) -> None:
+        self.tests, self.calls = tests, 0
+
+    def plan(self, **_kwargs):
+        self.calls += 1
+        if self.calls > 1:
+            raise RuntimeError("Nemotron reply failed parsing: no TEST blocks")
+        return ScriptedPlanner(self.tests).plan()
+
+
+def test_planner_failure_still_runs_earlier_tests_and_is_a_condition(auth_src) -> None:
+    fixer = ScriptedFixer([fixture_text("auth_weak.diff"), fixture_text("auth_correct.diff")])
+    cert = run(auth_src, fixer, FlakyPlanner([AUTH_ADVERSARIAL]), ["test_auth.py"])
+    second = check(cert, "adversarial", 1)
+    assert second.outcome == CheckOutcome.PASSED and second.tests_executed == 1  # old test ran
+    assert "planner failed" in second.summary
+    assert cert.verdict == VerificationVerdict.VERIFIED_WITH_CONDITIONS
+    assert any("planner failed" in lim for lim in cert.limitations)
+
+
+def test_planner_failure_with_no_earlier_tests_is_insufficient(auth_src) -> None:
+    class AlwaysFails:
+        def plan(self, **_):
+            raise RuntimeError("boom")
+
+    cert = run(
+        auth_src, ScriptedFixer([fixture_text("auth_correct.diff")]), AlwaysFails(),
+        ["test_auth.py"], max_iterations=1,
+    )  # fmt: skip
+    adv = check(cert, "adversarial")
+    assert adv.outcome == CheckOutcome.ERROR and "planner failed" in adv.summary
+    assert cert.verdict == VerificationVerdict.INSUFFICIENT_EVIDENCE
+
+
+def test_feedback_accumulates_counterexamples_across_attempts(auth_src) -> None:
+    weak2 = fixture_text("auth_weak.diff").replace(
+        '+    return token_type != "access"', '+    return bool(token_type != "access")'
+    )
+    fixer = ScriptedFixer(
+        [fixture_text("auth_weak.diff"), weak2, fixture_text("auth_correct.diff")]
+    )
+    cert = run(
+        auth_src, fixer, FlakyPlanner([AUTH_ADVERSARIAL]), ["test_auth.py"], max_iterations=3
+    )
+    third = fixer.calls[2] or ""
+    assert "All counterexamples found so far" in third and "unknown_token_type" in third
+    assert cert.verdict == VerificationVerdict.VERIFIED_WITH_CONDITIONS
+
+
+# --- self-review baseline (LLM reviews LLM; nothing executed) ---------------------------------
+
+
+class ScriptedReviewer:
+    def __init__(self, results) -> None:
+        self.results, self.calls = results, 0
+
+    def review(self, **_kwargs):
+        result = self.results[min(self.calls, len(self.results) - 1)]
+        self.calls += 1
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+
+def run_review(src, fixer, reviewer, targets, max_iterations=3):
+    pipeline = RepairPipeline(
+        sandbox=LocalSandbox(), fixer=fixer, planner=None, reviewer=reviewer,
+        max_iterations=max_iterations,
+    )  # fmt: skip
+    return pipeline.run(source=src, issue=AUTH_ISSUE, repro_targets=targets)
+
+
+def test_self_review_can_reject_and_feed_back_defects(auth_src) -> None:
+    from app.agents.models import ReviewResult
+
+    fixer = ScriptedFixer([fixture_text("auth_weak.diff"), fixture_text("auth_correct.diff")])
+    reviewer = ScriptedReviewer(
+        [
+            ReviewResult(accept=False, defects=["accepts unknown token types"]),
+            ReviewResult(accept=True),
+        ]
+    )
+    cert = run_review(auth_src, fixer, reviewer, ["test_auth.py"])
+    assert len(cert.iterations) == 2 and reviewer.calls == 2
+    assert "accepts unknown token types" in (fixer.calls[1] or "")
+    assert check(cert, "self_review", 0).outcome == CheckOutcome.FAILED
+    assert check(cert, "self_review", 1).outcome == CheckOutcome.PASSED
+
+
+def test_self_review_that_accepts_a_weak_patch_is_not_evidence(auth_src) -> None:
+    from app.agents.models import ReviewResult
+
+    cert = run_review(
+        auth_src, ScriptedFixer([fixture_text("auth_weak.diff")]),
+        ScriptedReviewer([ReviewResult(accept=True)]), ["test_auth.py"],
+    )  # fmt: skip
+    assert len(cert.iterations) == 1  # the loop stopped: reviewer said fine
+    # ...yet the real counterexample exists: the weak patch fails the executed contract test.
+    assert (
+        cert.verdict == VerificationVerdict.INSUFFICIENT_EVIDENCE
+    )  # no executed adversarial evidence
+
+
+def test_review_failure_is_treated_as_no_objection(auth_src) -> None:
+    cert = run_review(
+        auth_src, ScriptedFixer([fixture_text("auth_correct.diff")]),
+        ScriptedReviewer([RuntimeError("unparseable")]), ["test_auth.py"],
+    )  # fmt: skip
+    review = check(cert, "self_review")
+    assert review.outcome == CheckOutcome.ERROR and len(cert.iterations) == 1
+
+
+# --- code context given to the model ---------------------------------------------------------
+
+
+def test_collect_code_puts_failing_test_first_and_traceback_files_before_others(tmp_path) -> None:
+    from app.pipeline.runner import collect_code
+
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_x.py").write_text("def test_x():\n    assert f() == 1\n")
+    (tmp_path / "a_unrelated.py").write_text("A = 1\n")
+    (tmp_path / "z_buggy.py").write_text("def f():\n    return 2\n")
+    text = collect_code(
+        tmp_path, focus_text="/work/z_buggy.py:2: AssertionError", test_files=["tests/test_x.py"]
+    )
+    order = [text.index(n) for n in ("tests/test_x.py", "z_buggy.py", "a_unrelated.py")]
+    assert order == sorted(order)
+    assert "read-only context, do not edit" in text
+
+
+# --- real projects: pre-existing failures must not be blamed on the patch ---------------------
+
+CALC = (
+    "def add(a, b):\n"
+    '    """Return the sum of a and b."""\n'
+    "    return a - b\n\n\n"
+    "def mul(a, b):\n"
+    "    return a * b\n"
+)
+CALC_TESTS = {
+    "calc.py": CALC,
+    "test_calc.py": (
+        "from calc import add, mul\n\n"
+        "def test_add():\n    assert add(2, 3) == 5\n\n"
+        "def test_mul():\n    assert mul(2, 3) == 6\n"
+    ),
+    "test_unrelated.py": "def test_unrelated():\n    assert False\n",  # fails before and after
+    "test_broken_import.py": "import zzz_missing_pkg_for_test\n\ndef test_z():\n    pass\n",
+}
+CALC_SPEC_TEST = AdversarialTest(
+    name="add_sums",
+    rationale="documented contract",
+    spec_quote="Return the sum of a and b",
+    code=(
+        "from calc import add\n\n"
+        "def test_add_sums():\n    assert add(-1, 1) == 0\n    assert add(2, 3) == 5\n"
+    ),
+)
+
+
+def calc_project(tmp_path):
+    for name, content in CALC_TESTS.items():
+        (tmp_path / name).write_text(content)
+    return tmp_path
+
+
+def calc_diff(new_calc: str) -> str:
+    import difflib
+
+    return "".join(
+        difflib.unified_diff(
+            CALC.splitlines(True),
+            new_calc.splitlines(True),
+            fromfile="a/calc.py",
+            tofile="b/calc.py",
+        )
+    )
+
+
+def run_calc(src, diff, planner=None):
+    pipeline = RepairPipeline(
+        sandbox=LocalSandbox(), fixer=ScriptedFixer([diff]),
+        planner=planner or ScriptedPlanner([CALC_SPEC_TEST]), max_iterations=1,
+    )  # fmt: skip
+    return pipeline.run(
+        source=src,
+        issue="add() subtracts instead of adding",
+        repro_targets=["test_calc.py::test_add"],
+    )
+
+
+def test_preexisting_failures_are_excluded_but_disclosed(tmp_path) -> None:
+    cert = run_calc(calc_project(tmp_path), calc_diff(CALC.replace("a - b", "a + b")))
+    regression = check(cert, "regression")
+    assert regression.outcome == CheckOutcome.PASSED
+    assert "pre-existing failure(s) unchanged" in regression.summary
+    assert any("already failing before the patch" in lim for lim in cert.limitations)
+    assert cert.verdict == VerificationVerdict.VERIFIED_WITH_CONDITIONS
+
+
+def test_a_patch_that_breaks_another_passing_test_is_a_regression(tmp_path) -> None:
+    broken = CALC.replace("a - b", "a + b").replace("return a * b", "return a + b")
+    cert = run_calc(calc_project(tmp_path), calc_diff(broken))
+    regression = check(cert, "regression")
+    assert regression.outcome == CheckOutcome.FAILED
+    assert any("test_calc.py::test_mul" in c for c in regression.counterexamples)
+    assert cert.verdict == VerificationVerdict.NOT_VERIFIED
+
+
+def test_a_patch_that_makes_tests_vanish_is_a_regression(tmp_path) -> None:
+    vanishing = "import zzz_missing_pkg_for_test\n" + CALC.replace("a - b", "a + b")
+    cert = run_calc(calc_project(tmp_path), calc_diff(vanishing))
+    assert check(cert, "regression").outcome == CheckOutcome.FAILED
+    assert cert.verdict == VerificationVerdict.NOT_VERIFIED
+
+
+def test_no_usable_baseline_means_insufficient_evidence(tmp_path, monkeypatch) -> None:
+    from app.verification.suite import SuiteRun
+
+    monkeypatch.setattr("app.pipeline.runner.run_suite", lambda *a, **k: SuiteRun(timed_out=True))
+    cert = run_calc(calc_project(tmp_path), calc_diff(CALC.replace("a - b", "a + b")))
+    reg = check(cert, "regression")
+    assert reg.outcome == CheckOutcome.ERROR and "baseline" in reg.summary
+    assert cert.verdict == VerificationVerdict.INSUFFICIENT_EVIDENCE

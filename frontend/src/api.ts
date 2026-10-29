@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
+export const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
 
 export type Verdict =
   | 'verified'
@@ -34,6 +34,34 @@ export type Iteration = {
   counterexamples: string[]
   feedback_to_fixer: string | null
   note: string
+  test_results: Record<string, string>
+  score: number | null
+}
+
+export type AdversarialTest = {
+  name: string
+  rationale: string
+  spec_quote: string
+  grounded: boolean
+  grounding_note: string
+  key: string
+  disputed: boolean
+  dispute_reason: string
+  code: string
+}
+
+export type VulnerabilityFinding = {
+  file: string
+  line_number: number
+  issue_description: string
+  severity: 'HIGH' | 'MEDIUM' | 'LOW' | string
+  rule_id?: string
+}
+
+export type FixExplanation = {
+  root_cause: string
+  the_fix: string
+  technical_keywords: string[]
 }
 
 export type Certificate = {
@@ -69,20 +97,84 @@ export type Certificate = {
   checks: Check[]
   unexecuted_checks: string[]
   iterations: Iteration[]
+  adversarial_tests: AdversarialTest[]
   max_iterations: number
+  selected_attempt: number | null
+  contested: string[]
+  derived_from: string | null
+  reverified_attempt: number | null
   limitations: string[]
   disclaimers: string[]
   verdict: Verdict
   verdict_reasons: string[]
   timeline: { at: string; stage: string; message: string }[]
   certificate_sha256: string
+  security_verified?: boolean | null
+  security_seal?: 'Verified Secure' | 'SECURITY COMPROMISED' | string | null
+  vulnerabilities?: VulnerabilityFinding[] | null
+  explanation?: FixExplanation | null
+  language?: string
 }
+
+export type TimelineEvent = { at: string; stage: string; message: string }
 
 export type InvestigationState = {
   id: string
   stage: string
   error: string | null
+  issue: string
+  project_name: string | null
+  example_case: string | null
+  parent_id: string | null
+  events: TimelineEvent[]
   certificate: Certificate | null
+}
+
+export type ProjectInfo = {
+  id: string
+  name: string
+  origin: 'zip' | 'git' | 'local'
+  origin_detail: string
+  files: number
+  bytes: number
+  python_files: number
+  test_files: number
+  language?: string
+}
+
+export type SyncEvent = {
+  event: 'TESTS_RE_RUNNING' | 'RUN_COMPLETE'
+  project_id: string
+  file_path: string
+  event_type?: string
+  language?: string
+  result?: {
+    total_tests: number
+    passed: number
+    failed: number
+    errors: number
+    duration_seconds: number
+    timed_out: boolean
+    failures: { test_name: string; message: string; file?: string | null; line?: number | null }[]
+  }
+  timestamp: string
+}
+
+export type FailingTest = { node_id: string; message: string }
+
+export type ScanResult = {
+  exit_code: number | null
+  timed_out: boolean
+  duration_seconds: number
+  tests: number
+  failed: number
+  errors: number
+  skipped: number
+  failing_tests: FailingTest[]
+  collection_errors: FailingTest[]
+  missing_modules: string[]
+  hint: string
+  output_excerpt: string
 }
 
 export type AboutResponse = {
@@ -90,36 +182,163 @@ export type AboutResponse = {
   status: string
   nebius_model: string
   nebius_configured: boolean
+  github_configured: boolean
   sandbox_mode: string
   example_cases: string[]
+  example_issues: Record<string, string>
+  project_sources: { zip: boolean; git: boolean; local: boolean }
+  max_project_mb: number
   implemented_now: string[]
   not_implemented: string[]
 }
 
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...init,
-  })
-  if (!response.ok) {
-    const detail = await response.json().catch(() => ({}))
-    throw new Error(detail.detail ?? `Request failed (${response.status})`)
-  }
-  return response.json()
+export type BenchmarkTrial = {
+  case: string
+  mode: string
+  trial: number
+  accepted: boolean
+  oracle_passed: boolean | null
+  resolved: boolean
+  false_accept: boolean
+  false_reject: boolean
+  iterations: number
+  runtime_seconds: number
+  prompt_tokens: number
+  completion_tokens: number
+  verdict: string
+  error: string | null
 }
 
-export const getAbout = () => call<AboutResponse>('/api/v1/about')
-export const getInvestigation = (id: string) => call<InvestigationState>(`/api/v1/investigations/${id}`)
+export type ModeSummary = {
+  trials: number
+  resolved_rate: number
+  false_acceptance_rate_of_accepted: number | null
+  false_rejection_rate: number
+  mean_iterations: number
+  mean_runtime_seconds: number
+  total_tokens: number
+  errors: number
+}
 
-export async function startExampleRun(exampleCase: string, issue: string): Promise<string> {
-  const created = await call<InvestigationState>('/api/v1/investigations', {
+export type BenchmarkResponse =
+  | { available: false }
+  | {
+      available: true
+      file: string
+      report: {
+        environment: Record<string, unknown>
+        trials: BenchmarkTrial[]
+        notes: string[]
+        summary: Record<string, ModeSummary>
+      }
+    }
+
+/** An API failure. `code` is the backend's stable error code when it sent one. */
+export class ApiError extends Error {
+  code?: string
+  constructor(message: string, code?: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.code = code
+  }
+}
+
+async function call<T>(path: string, init?: RequestInit): Promise<T> {
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE}${path}`, init)
+  } catch {
+    throw new Error('Cannot reach the FixProof backend. Is it running on ' + API_BASE + '?')
+  }
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    const detail = body.detail
+    const text = Array.isArray(detail)
+      ? detail.map((d: { msg?: string }) => d.msg).join('; ')
+      : (detail ?? `Request failed (${response.status})`)
+    throw new ApiError(String(text), typeof body.code === 'string' ? body.code : undefined)
+  }
+  return response.status === 204 ? (undefined as T) : response.json()
+}
+
+const json = (body: unknown): RequestInit => ({
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+})
+
+export const getAbout = () => call<AboutResponse>('/api/v1/about')
+export const getBenchmark = () => call<BenchmarkResponse>('/api/v1/benchmark')
+export const getInvestigation = (id: string) =>
+  call<InvestigationState>(`/api/v1/investigations/${id}`)
+
+export const uploadProject = (file: File) =>
+  call<ProjectInfo>('/api/v1/projects/upload', {
     method: 'POST',
-    body: JSON.stringify({
-      repo_url: 'https://github.com/jiya2401/fixproof',
-      issue,
-      example_case: exampleCase,
-    }),
+    headers: { 'Content-Type': 'application/zip', 'X-Filename': file.name },
+    body: file,
   })
+export const projectFromGit = (url: string, ref?: string) =>
+  call<ProjectInfo>('/api/v1/projects/git', json({ url, ref: ref || null }))
+export const projectFromLocal = (path: string) =>
+  call<ProjectInfo>('/api/v1/projects/local', json({ path }))
+export const scanProject = (id: string) =>
+  call<ScanResult>(`/api/v1/projects/${id}/scan`, { method: 'POST' })
+
+export async function startInvestigation(args: {
+  issue: string
+  exampleCase?: string
+  projectId?: string
+  reproTargets?: string[]
+}): Promise<string> {
+  const created = await call<InvestigationState>(
+    '/api/v1/investigations',
+    json({
+      issue: args.issue,
+      example_case: args.exampleCase ?? null,
+      project_id: args.projectId ?? null,
+      repro_targets: args.reproTargets ?? [],
+    }),
+  )
   await call(`/api/v1/investigations/${created.id}/run`, { method: 'POST' })
   return created.id
 }
+
+export async function reverifyInvestigation(
+  id: string, attempt: number, disputed: string[], reason: string,
+): Promise<string> {
+  const reply = await call<{ investigation_id: string }>(
+    `/api/v1/investigations/${id}/reverify`, json({ attempt, disputed, reason }),
+  )
+  return reply.investigation_id
+}
+
+export type PullRequestResult = {
+  number: number
+  url: string
+  branch: string
+  base: string
+  patch_id: string
+  commit_sha: string | null
+  files_changed: { path: string; change: string }[]
+  mergeable: boolean | null // null: GitHub is still computing it
+  warning: string | null
+  reused: boolean // an open PR for this certificate already existed
+}
+
+/** Opens a GitHub PR for a verified patch. The token travels in a header and is never stored. */
+export const createPullRequest = (
+  id: string,
+  args: { repository?: string; baseBranch?: string; token?: string },
+) =>
+  call<PullRequestResult>(`/api/v1/investigations/${id}/pull-request`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(args.token ? { 'X-GitHub-Token': args.token } : {}),
+    },
+    body: JSON.stringify({
+      repository: args.repository || null,
+      base_branch: args.baseBranch || null,
+    }),
+  })

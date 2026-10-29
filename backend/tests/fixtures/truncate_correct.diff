@@ -1,0 +1,12 @@
+--- a/truncate.py
++++ b/truncate.py
+@@ -6,4 +6,8 @@
+     - Otherwise the result ends with ``suffix`` and is exactly ``width`` characters long.
+     - Raises ``ValueError`` if ``width`` is smaller than ``len(suffix)``.
+     """
+-    return text[:width] + suffix
++    if width < len(suffix):
++        raise ValueError("width must be at least len(suffix)")
++    if len(text) <= width:
++        return text
++    return text[: width - len(suffix)] + suffix

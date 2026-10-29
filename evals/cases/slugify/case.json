@@ -1,0 +1,9 @@
+{
+  "name": "slugify",
+  "source": "examples/slugify-app",
+  "issue": "slugify() does not produce a slug: slugify('Hello World') returns 'hello world' instead of 'hello-world'.",
+  "repro_targets": [
+    "test_slugify.py::test_two_words_are_joined_with_a_dash"
+  ],
+  "oracle_dir": "evals/cases/slugify/oracle"
+}

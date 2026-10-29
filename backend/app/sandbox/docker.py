@@ -8,7 +8,7 @@ from pathlib import Path
 
 from app.config import get_settings
 from app.sandbox.base import CommandResult, SandboxRunner
-from app.sandbox.local import _IGNORE, MAX_OUTPUT_CHARS
+from app.sandbox.common import _IGNORE, MAX_OUTPUT_CHARS
 from app.verification.results import SandboxInfo
 
 
@@ -42,7 +42,8 @@ class DockerSandbox(SandboxRunner):
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
             "--pids-limit", "256", "--memory", "1g", "--cpus", "1",
             "--user", "65534:65534",
-            "-e", "PYTHONDONTWRITEBYTECODE=1", "-e", "HOME=/tmp", "-e", "PYTHONPATH=/work",
+            "-e", "PYTHONDONTWRITEBYTECODE=1", "-e", "HOME=/tmp",
+            "-e", "PYTHONPATH=/work:/work/src",
             "-v", f"{workspace}:/work:rw", "-w", "/work",
             self.image, *command,
         ]  # fmt: skip

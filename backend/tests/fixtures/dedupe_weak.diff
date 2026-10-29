@@ -1,0 +1,8 @@
+--- a/dedupe.py
++++ b/dedupe.py
+@@ -6,4 +6,4 @@
+     - Items need not be hashable (lists and dicts are allowed).
+     - The input list is not modified.
+     """
+-    return list(set(items))
++    return list(dict.fromkeys(items))

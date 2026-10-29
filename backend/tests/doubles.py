@@ -38,6 +38,7 @@ class ScriptedInvestigator:
 AUTH_ADVERSARIAL = AdversarialTest(
     name="unknown_token_type",
     rationale="only refresh tokens may be accepted",
+    spec_quote="Return True only for refresh tokens",
     code=(
         "from auth import validate_refresh_token\n\n"
         "def test_unknown_type_rejected():\n"
@@ -48,6 +49,7 @@ AUTH_ADVERSARIAL = AdversarialTest(
 PAGINATE_ADVERSARIAL = AdversarialTest(
     name="invalid_args",
     rationale="docstring contract: ValueError for page<1 / per_page<1",
+    spec_quote="Raises ``ValueError`` if ``page < 1`` or ``per_page < 1``",
     code=(
         "import pytest\nfrom paginate import paginate\n\n"
         "def test_page_zero_raises():\n"

@@ -1,12 +1,17 @@
-"""Typed, machine-readable Fix Certificate. Used unchanged by the API and the frontend."""
+﻿"""Typed, machine-readable Fix Certificate. Used unchanged by the API and the frontend."""
 
 import hashlib
 import json
 from datetime import UTC, datetime
+
+# ---- Feature 3: explanation model ----
+from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from app.agents.models import AdversarialTest, FileEdit
+from app.security import VulnerabilityFinding
 from app.verification.results import (
     CheckOutcome,
     CheckResult,
@@ -60,6 +65,10 @@ class IterationRecord(BaseModel):
     counterexamples: list[str] = Field(default_factory=list)
     feedback_to_fixer: str | None = None
     note: str = ""
+    edits: list[FileEdit] = Field(default_factory=list)
+    # attack test key -> passed|failed|error for THIS attempt's patch (filled by cross-running)
+    test_results: dict[str, str] = Field(default_factory=dict)
+    score: int | None = None  # lower is better; used to pick the least-bad attempt
 
 
 class ModelInfo(BaseModel):
@@ -82,6 +91,7 @@ class FixCertificate(BaseModel):
     snapshot_sha256: str = ""
     issue: str = ""
     reproduction_targets: list[str] = Field(default_factory=list)
+    language: str = "python"
 
     model: ModelInfo = Field(default_factory=ModelInfo)
     sandbox: SandboxInfo = Field(default_factory=SandboxInfo)
@@ -99,9 +109,36 @@ class FixCertificate(BaseModel):
     checks: list[CheckResult] = Field(default_factory=list)
     unexecuted_checks: list[str] = Field(default_factory=list)
     iterations: list[IterationRecord] = Field(default_factory=list)
+    # Every model-authored test that was executed, with its spec quote, so passes can be audited.
+    adversarial_tests: list[AdversarialTest] = Field(default_factory=list)
     max_iterations: int = 0
+    selected_attempt: int | None = None  # the attempt whose patch and checks this verdict is about
+    contested: list[str] = Field(default_factory=list)  # attack tests that contradict each other
+    derived_from: str | None = None  # certificate hash this one re-verifies
+    reverified_attempt: int | None = None
 
     limitations: list[str] = Field(default_factory=list)
+
+    # ---- Security SAST scan results (Feature 4) ----
+    vulnerabilities: list[VulnerabilityFinding] = Field(
+        default_factory=list,
+        description="New HIGH/MEDIUM security findings introduced by the patch.",
+    )
+    security_verified: bool | None = Field(
+        default=None,
+        description="None=scan not run; True=clean; False=new vulnerabilities found.",
+    )
+    security_seal: str | None = Field(
+        default=None,
+        description="Human-readable security verdict seal.",
+    )
+
+    # ---- Feature 3: Visual Explanations ----
+    explanation: Any | None = Field(
+        default=None,
+        description="Structured dashboard explanation of the root cause and fix.",
+    )
+
     disclaimers: list[str] = Field(default_factory=lambda: list(STANDING_DISCLAIMERS))
     verdict: VerificationVerdict = VerificationVerdict.INSUFFICIENT_EVIDENCE
     verdict_reasons: list[str] = Field(default_factory=list)

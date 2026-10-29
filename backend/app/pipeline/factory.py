@@ -20,3 +20,10 @@ def build_pipeline(on_event=None, *, adversarial: bool = True) -> RepairPipeline
         model_info=lambda: client.usage.model_dump(),
         on_event=on_event,
     )
+
+
+def build_reverifier(on_event=None, model_usage: dict | None = None) -> RepairPipeline:
+    """Sandbox only: re-verification makes no model calls and needs no Nebius key."""
+    return RepairPipeline.for_reverification(
+        get_sandbox(), model_info=(lambda: model_usage) if model_usage else None, on_event=on_event
+    )

@@ -17,6 +17,14 @@ A check that "passes" while executing **zero** tests is treated as `not_run`.
 Tests skipped inside pytest are not counted as executed.
 A **counterexample** (`failed`) is distinct from an **execution failure** (`error`).
 
+## Patch format
+
+The model proposes SEARCH/REPLACE edits (exact text, must match exactly once); deterministic
+code verifies them and generates the unified diff (`repair/edits.py`). A failed match is fed back
+with the closest line in the file. Reason: a live Nemotron patch used bare `@@` hunk headers and
+was rejected by `git apply`; models are unreliable at diff line numbers. A fenced unified diff is
+still accepted as a fallback.
+
 ## Mandatory checks
 
 `reproduction_red` (precondition) · `patch_applies_in_scope` · `reproduction_green` ·
@@ -26,10 +34,24 @@ A **counterexample** (`failed`) is distinct from an **execution failure** (`erro
 - `patch_applies_in_scope`: diff parses, applies with `git apply`, stays inside the repo, and
   does **not** modify tests/conftest/test config (otherwise a model could "fix" a bug by editing the test).
 - `reproduction_green`: the same reproduction passes after patching.
-- `regression`: the repository's full pytest suite passes after patching.
-- `adversarial`: model-authored pytest tests, executed in the sandbox, find no counterexample.
+- `regression`: judged against a **pre-patch baseline**. The full suite runs once before the patch and once
+  after; the check fails if any test that passed before no longer passes (including tests that stop being
+  collected, e.g. through a new import error). Tests that were already failing, and collection errors, are not
+  blamed on the patch, but their number is disclosed as a limitation (verdict at most `VERIFIED_WITH_CONDITIONS`).
+  If the baseline or the post-patch run cannot complete (timeout, crash), the check is `error` and the verdict
+  is `INSUFFICIENT_EVIDENCE`.
+- `adversarial`: model-authored **spec-grounded** pytest tests, executed in the sandbox, find no counterexample. At least one grounded test must have executed.
+- `adversarial_ungrounded` (optional): tests whose spec quote was missing or not found. Their failures are reported as a condition for human review, never as a veto, and are never fed back to the fixer.
 
 All mandatory checks are re-run on a fresh workspace after **every** patch.
+
+## Spec grounding of model-written tests
+
+Each adversarial test must quote, verbatim, a sentence from the issue or from the ORIGINAL
+(pre-patch) source docstrings that it enforces (whitespace/case-insensitive, min 15 chars;
+test files are not a source of spec). The check is mechanical (`verification/grounding.py`).
+Counterexamples are printed with their `[SPEC: "..."]` quote for review. Grounding proves
+traceability, not that the assertion truly follows from the quote.
 
 ## Verdicts (evaluated in this order)
 
@@ -46,9 +68,27 @@ budget.* The certificate lists exactly what ran and what did not.
 
 ## Known weaknesses of this policy (read before trusting a verdict)
 
-- Adversarial tests are model-written. A failing one may be a wrong test (false rejection); a passing
-  one may be weak (false acceptance). Until mutation testing / test-validity gates exist, treat
-  counterexamples as candidates for human review.
+- Adversarial tests are model-written. Grounding reduces invented-rule rejections (observed once in a
+  live run: a test required rejecting `"refresh: abc123"`, which no stated rule covers), but a grounded
+  test can still over-interpret its quote, and a passing one may be weak. Treat counterexamples as
+  candidates for human review; mutation testing is not implemented.
+- **False counterexamples that grounding cannot catch (seen in two live paginate runs):** a test quoted the
+  real docstring sentence about a page past the end, then asserted `paginate([1,2,3,4,5], 3, 2) == []`. Page 3 is
+  `[5]`, so the assertion was wrong. Effects seen live: a correct patch was rejected, and the fixer, steered by the
+  wrong test, produced a worse patch (returning `[]` for partial last pages), which the executed tests then correctly
+  rejected. Mitigations now built:
+  1. every attack test is run against every attempt's patch; tests that cannot all be satisfied by the attempts
+     (one group passes only on attempt i, the other only on attempt j) are reported as **contested** and the fixer
+     is warned not to trade one group for the other;
+  2. the certificate reports the **least-bad attempt** (fewest executed failures; ties go to the later attempt),
+     not blindly the last one;
+  3. **human dispute**: a reviewer can exclude a failing, spec-grounded attack test with a written reason, and
+     every check is re-run on that attempt's patch with no model calls. The exclusion is a recorded condition
+     (verdict at most `VERIFIED_WITH_CONDITIONS`); only tests that failed on that attempt can be excluded, and
+     excluding tests never hides a failure from another test.
+  Not solved: nothing decides *automatically* which side of a contradiction is right.
+- If the test-author reply cannot be parsed in an iteration, tests from earlier iterations still run and
+  a limitation is recorded (verdict at most `VERIFIED_WITH_CONDITIONS`).
 - Hypotheses are not experimentally discriminated (recorded as `proposed_untested`).
 - Local-process sandbox mode caps every verdict at `VERIFIED_WITH_CONDITIONS` by design.
 

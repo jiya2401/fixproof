@@ -1,5 +1,6 @@
 import fnmatch
 import hashlib
+import re
 import subprocess
 from pathlib import Path, PurePosixPath
 
@@ -54,16 +55,85 @@ def patch_violations(diff: str) -> list[str]:
     return problems
 
 
+_HUNK_HEADER = re.compile(r"^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@")
+
+
+def _file_eol(path: Path) -> str | None:
+    """Return the file's uniform line ending ("\n" or "\r\n"), or None if mixed/unreadable."""
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return "\n"  # new file: nothing to match against
+    crlf = data.count(b"\r\n")
+    lf = data.count(b"\n") - crlf
+    if crlf and lf:
+        return None
+    return "\r\n" if crlf else "\n"
+
+
+def adapt_diff_to_file_endings(workspace: Path, diff: str) -> tuple[str | None, str]:
+    """Re-encode each file's hunk lines in that file's own line-ending style.
+
+    Models and tools see source through universal-newline reads (always LF), but the file on
+    disk may be CRLF (Windows checkouts). Context must still match byte-for-byte; only the EOL
+    representation of the diff is adapted, in memory. Mixed-ending files are refused rather
+    than guessed. Returns (adapted_diff, "") or (None, reason).
+    """
+    lines = diff.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    out: list[str] = []
+    eol = "\n"
+    old_left = new_left = 0
+    for index, line in enumerate(lines):
+        if old_left == 0 and new_left == 0:  # outside a hunk body: headers stay LF
+            if line.startswith("--- "):
+                target = _strip_prefix(line[4:].split("\t")[0].strip())
+                found = _file_eol(workspace / target) if target != "/dev/null" else "\n"
+                if found is None:
+                    return None, f"{target} has mixed line endings; refusing to guess"
+                eol = found
+            match = _HUNK_HEADER.match(line)
+            if match:
+                old_left = int(match.group(1) if match.group(1) is not None else 1)
+                new_left = int(match.group(2) if match.group(2) is not None else 1)
+            out.append(line + "\n")
+            continue
+        if line.startswith("\\"):  # "\ No newline at end of file"
+            out.append(line + "\n")
+            continue
+        marker = line[:1]
+        old_left -= marker in (" ", "-", "")
+        new_left -= marker in (" ", "+", "")
+        # The final line of a file with no trailing newline carries no CR either.
+        no_eol_follows = index + 1 < len(lines) and lines[index + 1].startswith("\\")
+        out.append(line + ("\n" if no_eol_follows else eol))
+    return "".join(out), ""
+
+
 def apply_patch(workspace: Path, diff: str) -> tuple[bool, str]:
-    """Apply a unified diff in `workspace` using git apply (check first, then apply)."""
-    body = diff if diff.endswith("\n") else diff + "\n"
+    """Apply a unified diff with `git apply` (all-or-nothing): check first, then apply.
+
+    Strict: no whitespace-insensitive matching. The workspace is never modified unless the
+    adapted diff passes `--check`, so a failed patch leaves it untouched.
+    """
+    adapted, reason = adapt_diff_to_file_endings(workspace, diff)
+    if adapted is None:
+        return False, reason
+    body = adapted.encode("utf-8")  # bytes: no platform newline translation
     for args in (["--check"], []):
         done = subprocess.run(
             ["git", "apply", "--whitespace=nowarn", *args, "-"],
-            cwd=workspace, input=body, capture_output=True, text=True, check=False,
+            cwd=workspace, input=body, capture_output=True, check=False,
         )  # fmt: skip
         if done.returncode != 0:
-            return False, (done.stderr or done.stdout).strip()[:2000]
+            message = (done.stderr or done.stdout).decode("utf-8", "replace").strip()
+            if "No valid patches" in message:
+                message += (
+                    " (hunk headers must carry line numbers, e.g. '@@ -1,9 +1,11 @@'; "
+                    "prefer SEARCH/REPLACE edits)"
+                )
+            return False, message[:2000]
     return True, "applied"
 
 

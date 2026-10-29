@@ -1,0 +1,19 @@
+--- a/dedupe.py
++++ b/dedupe.py
+@@ -6,4 +6,15 @@
+     - Items need not be hashable (lists and dicts are allowed).
+     - The input list is not modified.
+     """
+-    return list(set(items))
++    result: list = []
++    seen: set = set()
++    for item in items:
++        try:
++            if item in seen:
++                continue
++            seen.add(item)
++        except TypeError:  # unhashable: fall back to equality against kept items
++            if item in result:
++                continue
++        result.append(item)
++    return result

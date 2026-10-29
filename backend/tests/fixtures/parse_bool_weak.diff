@@ -1,0 +1,8 @@
+--- a/parse_bool.py
++++ b/parse_bool.py
+@@ -7,4 +7,4 @@
+       ``1``, ``on`` give ``True``; ``false``, ``no``, ``0``, ``off`` give ``False``.
+     - Anything else (including ``None``, numbers and other strings) raises ``ValueError``.
+     """
+-    return bool(value)
++    return str(value).lower() == "true"
