@@ -1,7 +1,17 @@
-from pathlib import Path
+from datetime import UTC, datetime
+from pathlib import Path, PurePosixPath
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Header,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, HttpUrl
@@ -23,6 +33,7 @@ from app.llm.nebius import NebiusConfigurationError
 from app.orchestrator.state import InvestigationStage, InvestigationState
 from app.pipeline import factory
 from app.projects import ProjectError, ProjectInfo, ProjectStore
+from app.runners import get_language_runner
 from app.sandbox.factory import SandboxUnavailable, get_sandbox
 from app.verification.results import CheckOutcome
 from app.verification.scan import ScanResult, TargetError, scan_project, validate_repro_targets
@@ -186,6 +197,154 @@ def scan(project_id: str) -> ScanResult:
     except SandboxUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return scan_project(sandbox, source)
+
+
+# ------------------------------------------------------- live local file sync (kill switch)
+
+
+class ProjectSyncRequest(BaseModel):
+    project_id: str | None = None
+    file_path: str
+    content: str | None = None
+    event_type: str = "modified"  # modified | created | deleted
+
+
+class ProjectSyncResponse(BaseModel):
+    status: str
+    project_id: str
+    file_path: str
+    event_type: str
+    language: str
+    test_result: dict[str, Any] | None = None
+    detail: str = ""
+
+
+class SyncConnectionManager:
+    def __init__(self) -> None:
+        self.active_connections: list[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket) -> None:
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket) -> None:
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict[str, Any]) -> None:
+        for connection in list(self.active_connections):
+            try:
+                await connection.send_json(message)
+            except Exception:
+                self.disconnect(connection)
+
+
+sync_manager = SyncConnectionManager()
+
+
+@router.websocket("/ws/sync")
+async def websocket_sync_route(websocket: WebSocket) -> None:
+    await sync_manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        sync_manager.disconnect(websocket)
+    except Exception:
+        sync_manager.disconnect(websocket)
+
+
+def _resolve_sync_project(project_id: str | None) -> tuple[str, Path]:
+    store = _store()
+    if project_id and project_id.strip():
+        info, source = store.get(project_id.strip())
+        return info.id, source
+    for inv in reversed(list(_INVESTIGATIONS.values())):
+        if inv.project_id:
+            try:
+                info, source = store.get(inv.project_id)
+                return info.id, source
+            except KeyError:
+                continue
+    projects = [p for p in store.root.iterdir() if p.is_dir() and (p / "src").is_dir()]
+    if projects:
+        latest = max(projects, key=lambda p: p.stat().st_mtime)
+        return latest.name, latest / "src"
+    raise HTTPException(status_code=404, detail="No active project found to sync")
+
+
+@router.post("/project/sync", response_model=ProjectSyncResponse)
+async def sync_project_file(payload: ProjectSyncRequest) -> ProjectSyncResponse:
+    pid, source = _resolve_sync_project(payload.project_id)
+    clean_rel = PurePosixPath(payload.file_path.replace("\\", "/").lstrip("/"))
+    if ".." in clean_rel.parts or clean_rel.is_absolute():
+        raise HTTPException(status_code=400, detail="Invalid relative file path")
+    dest_path = (source / clean_rel).resolve()
+    if source.resolve() not in dest_path.parents and dest_path != source.resolve():
+        raise HTTPException(
+            status_code=400, detail="Path traversal outside project root is forbidden"
+        )
+
+    if payload.event_type == "deleted":
+        if dest_path.exists():
+            dest_path.unlink()
+    else:
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        dest_path.write_text(payload.content or "", encoding="utf-8")
+
+    await sync_manager.broadcast(
+        {
+            "event": "TESTS_RE_RUNNING",
+            "project_id": pid,
+            "file_path": str(clean_rel),
+            "event_type": payload.event_type,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+    )
+
+    runner = get_language_runner(source)
+    try:
+        sandbox = get_sandbox()
+        test_run = await run_in_threadpool(runner.run_tests, sandbox, source)
+        test_dict = test_run.to_dict()
+    except Exception as exc:
+        test_dict = {
+            "total_tests": 0,
+            "passed": 0,
+            "failed": 0,
+            "errors": 1,
+            "duration_seconds": 0.0,
+            "timed_out": False,
+            "failures": [
+                {
+                    "test_name": "(sandbox_execution)",
+                    "message": str(exc),
+                    "file": None,
+                    "line": None,
+                }
+            ],
+        }
+
+    await sync_manager.broadcast(
+        {
+            "event": "RUN_COMPLETE",
+            "project_id": pid,
+            "file_path": str(clean_rel),
+            "language": runner.language.value,
+            "result": test_dict,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+    )
+
+    return ProjectSyncResponse(
+        status="ok",
+        project_id=pid,
+        file_path=str(clean_rel),
+        event_type=payload.event_type,
+        language=runner.language.value,
+        test_result=test_dict,
+        detail=f"Successfully synced {clean_rel} and executed {runner.language.value} tests",
+    )
 
 
 # ---------------------------------------------------------------- investigations

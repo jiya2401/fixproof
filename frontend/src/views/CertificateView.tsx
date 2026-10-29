@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import type { Certificate, Check, Iteration, Outcome, ProjectInfo, Verdict } from '../api'
+import { useEffect, useState } from 'react'
+import { API_BASE, type Certificate, type Check, type Iteration, type Outcome, type ProjectInfo, type Verdict } from '../api'
 import {
   Alert, Button, Card, Check as CheckIcon, Copy, Cross, Download, Pill, SectionTitle, Shield, Stat,
   type Tone,
@@ -83,7 +83,53 @@ export default function CertificateView({
   project?: ProjectInfo | null
 }) {
   const [copied, setCopied] = useState<string | null>(null)
+  const [syncStatus, setSyncStatus] = useState<'running' | 'complete' | null>(null)
+  const [syncFile, setSyncFile] = useState<string | null>(null)
+  const [syncLang, setSyncLang] = useState<string>('python')
+  const [syncResult, setSyncResult] = useState<any>(null)
   const v = VERDICTS[cert.verdict]
+
+  useEffect(() => {
+    let ws: WebSocket | null = null
+    let reconnectTimeout: any = null
+    const wsUrl = `${API_BASE.replace(/^http/, 'ws')}/api/v1/ws/sync`
+
+    function connect() {
+      try {
+        ws = new WebSocket(wsUrl)
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data)
+            if (data.event === 'TESTS_RE_RUNNING') {
+              setSyncStatus('running')
+              setSyncFile(data.file_path || 'file')
+            } else if (data.event === 'RUN_COMPLETE') {
+              setSyncStatus('complete')
+              setSyncFile(data.file_path || 'file')
+              if (data.language) setSyncLang(data.language)
+              if (data.result) setSyncResult(data.result)
+            }
+          } catch {
+            // ignore
+          }
+        }
+        ws.onclose = () => {
+          reconnectTimeout = setTimeout(connect, 3000)
+        }
+      } catch {
+        // ignore
+      }
+    }
+    connect()
+
+    return () => {
+      if (reconnectTimeout) clearTimeout(reconnectTimeout)
+      if (ws) {
+        ws.onclose = null
+        ws.close()
+      }
+    }
+  }, [])
   const copy = async (what: string, text: string) => {
     try { await navigator.clipboard.writeText(text); setCopied(what); setTimeout(() => setCopied(null), 1500) } catch { /* clipboard blocked */ }
   }
@@ -111,7 +157,14 @@ export default function CertificateView({
           <div className="flex items-start gap-4">
             <div className="rounded-2xl bg-black/30 p-3"><Shield className="h-8 w-8 text-white" /></div>
             <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-zinc-400">Fix Certificate · policy v{cert.policy_version}</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-xs uppercase tracking-[0.2em] text-zinc-400">
+                  {project?.name || cert.source_label || 'Fix Certificate'} · policy v{cert.policy_version}
+                </p>
+                <span className="bg-zinc-800 border border-zinc-700 text-zinc-300 uppercase px-2 py-0.5 rounded-full text-xs font-mono font-medium">
+                  {cert.language ?? project?.language ?? 'python'}
+                </span>
+              </div>
               <h2 id="verdict" className="mt-1 text-4xl font-semibold tracking-tight text-white">{v.label}</h2>
               <p className="mt-2 max-w-xl text-sm text-zinc-300">{v.line}</p>
             </div>
@@ -220,10 +273,60 @@ export default function CertificateView({
         </div>
       )}
 
+      {/* ⚡ Feature 1: "Kill Switch" Live Local File Sync Alert */}
+      {syncStatus === 'running' && (
+        <div className="flex items-center justify-between gap-3 rounded-2xl border border-sky-400/40 bg-sky-400/10 p-4 text-sm text-sky-200 animate-pulse">
+          <div className="flex items-center gap-3">
+            <span className="text-xl">⚡</span>
+            <div>
+              <p className="font-semibold text-sky-100 flex items-center gap-2">
+                Hot-Sync Triggered: Re-running Test Suite...
+                <span className="rounded-md border border-sky-400/30 bg-sky-400/20 px-2 py-0.5 text-[11px] font-mono text-sky-200 uppercase">
+                  {syncFile}
+                </span>
+              </p>
+              <p className="text-xs text-sky-300/80">
+                File change saved in local workspace; hot-syncing and executing tests inside sandbox.
+              </p>
+            </div>
+          </div>
+          <Pill tone="blue">Re-running</Pill>
+        </div>
+      )}
+
+      {syncStatus === 'complete' && syncResult && (
+        <div className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl border p-4 text-sm ${
+          syncResult.failed === 0 && syncResult.errors === 0
+            ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-200'
+            : 'border-red-400/30 bg-red-400/10 text-red-200'
+        }`}>
+          <div className="flex items-center gap-3">
+            <span className="text-xl">⚡</span>
+            <div>
+              <p className="font-semibold flex items-center gap-2">
+                Live Sync Hot-Reload: {syncResult.failed === 0 && syncResult.errors === 0 ? 'All Tests Passed' : 'Test Failure Detected'}
+                <span className="rounded-md border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[11px] font-mono text-zinc-300 uppercase">
+                  {syncFile}
+                </span>
+                <span className="rounded-md border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[11px] font-mono text-zinc-300 uppercase">
+                  {syncLang}
+                </span>
+              </p>
+              <p className="text-xs opacity-80">
+                {syncResult.passed} passed, {syncResult.failed} failed in {Number(syncResult.duration_seconds || 0).toFixed(2)}s. Stats counters updated live.
+              </p>
+            </div>
+          </div>
+          <Pill tone={syncResult.failed === 0 && syncResult.errors === 0 ? 'green' : 'red'}>
+            {syncResult.failed === 0 && syncResult.errors === 0 ? 'Hot-Sync OK' : `${syncResult.failed} Failed`}
+          </Pill>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         <Stat label="Attempts" value={`${cert.iterations.length}/${cert.max_iterations}`} sub={rejected ? `${rejected} rejected by evidence` : 'first patch held'} />
-        <Stat label="Tests executed" value={testsExecuted} sub="across final checks" />
-        <Stat label="Counterexamples" value={counterexamples} sub="found by execution" />
+        <Stat label="Tests executed" value={syncResult ? syncResult.total_tests : testsExecuted} sub={syncStatus ? "hot-synced live" : "across final checks"} />
+        <Stat label="Counterexamples" value={syncResult ? syncResult.failed : counterexamples} sub={syncStatus ? "hot-synced live" : "found by execution"} />
         <Stat label="Model usage" value={tokens.toLocaleString()} sub={`${cert.model.calls} calls · tokens`} />
         <Stat label="Wall time" value={`${runtime}s`} sub={cert.model.model.split('/').pop()} />
       </div>

@@ -113,6 +113,7 @@ export type Certificate = {
   security_seal?: 'Verified Secure' | 'SECURITY COMPROMISED' | string | null
   vulnerabilities?: VulnerabilityFinding[] | null
   explanation?: FixExplanation | null
+  language?: string
 }
 
 export type TimelineEvent = { at: string; stage: string; message: string }
@@ -138,6 +139,25 @@ export type ProjectInfo = {
   bytes: number
   python_files: number
   test_files: number
+  language?: string
+}
+
+export type SyncEvent = {
+  event: 'TESTS_RE_RUNNING' | 'RUN_COMPLETE'
+  project_id: string
+  file_path: string
+  event_type?: string
+  language?: string
+  result?: {
+    total_tests: number
+    passed: number
+    failed: number
+    errors: number
+    duration_seconds: number
+    timed_out: boolean
+    failures: { test_name: string; message: string; file?: string | null; line?: number | null }[]
+  }
+  timestamp: string
 }
 
 export type FailingTest = { node_id: string; message: string }
