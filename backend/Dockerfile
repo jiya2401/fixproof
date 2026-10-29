@@ -19,6 +19,7 @@ COPY backend/app ./app
 COPY backend/tests ./tests
 COPY backend/pyproject.toml ./pyproject.toml
 COPY evals /evals
+COPY evals ./evals
 
 EXPOSE 8000
 

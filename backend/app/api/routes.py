@@ -630,10 +630,22 @@ def create_pull_request(
 @router.get("/benchmark")
 def benchmark() -> dict[str, Any]:
     """Newest recorded benchmark report from evals/results, or available=false. Never invented."""
-    results = Path(__file__).resolve().parents[3] / "evals" / "results"
-    files = sorted(results.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-    if not files:
-        return {"available": False}
     import json
 
-    return {"available": True, "file": files[0].name, "report": json.loads(files[0].read_text())}
+    candidates = [
+        Path("/evals/results"),
+        Path("/app/evals/results"),
+        Path(__file__).resolve().parents[3] / "evals" / "results",
+        Path(__file__).resolve().parents[2] / "evals" / "results",
+        Path("evals/results"),
+    ]
+    for directory in candidates:
+        if directory.is_dir():
+            files = sorted(directory.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if files:
+                return {
+                    "available": True,
+                    "file": files[0].name,
+                    "report": json.loads(files[0].read_text(encoding="utf-8")),
+                }
+    return {"available": False}
