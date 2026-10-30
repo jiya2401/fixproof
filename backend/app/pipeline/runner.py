@@ -39,6 +39,8 @@ from app.sandbox.base import SandboxRunner
 from app.security import SecurityScanResult, VulnerabilityFinding, run_security_scan
 from app.verification.contest import find_contests
 from app.verification.grounding import build_spec_corpus, check_grounding
+from app.runners import get_language_runner
+from app.runners.schema import TestRunResult as _TestRunResult
 from app.verification.pytest_runner import run_pytest_check
 from app.verification.results import (
     CheckOutcome,
@@ -103,7 +105,11 @@ def collect_code(
             chunks.append(
                 (-1, name, f"### {name}  (FAILING TEST - read-only context, do not edit)\n{body}\n")
             )
-    for path in sorted(workspace.rglob("*.py")):
+    _SOURCE_GLOBS = ["*.py", "*.go", "*.ts", "*.tsx", "*.js", "*.jsx"]
+    _all_src: list = []
+    for _pat in _SOURCE_GLOBS:
+        _all_src.extend(workspace.rglob(_pat))
+    for path in sorted(set(_all_src)):
         rel = path.relative_to(workspace).as_posix()
         if rel.startswith((".", ADV_DIR)) or "/." in rel or is_protected_path(rel):
             continue
@@ -178,6 +184,54 @@ def _score(iteration: IterationRecord) -> int:
 
 def _skipped(name: str, reason: str) -> CheckResult:
     return CheckResult(name=name, outcome=CheckOutcome.SKIPPED, summary=reason)
+
+
+def _trr_to_check(
+    trr: "_TestRunResult",
+    *,
+    name: str,
+    role: "CheckRole" = None,
+    expect_failure: bool = False,
+) -> CheckResult:
+    """Translate a :class:`~app.runners.schema.TestRunResult` into a pipeline
+    :class:`~app.verification.results.CheckResult`.
+
+    This bridges the language-agnostic runner output into the verification
+    pipeline's evidence schema.
+    """
+    from app.verification.results import CheckOutcome, CheckRole as _CR
+    _role = role if role is not None else _CR.CORRECTNESS
+    check = CheckResult(
+        name=name,
+        role=_role,
+        duration_seconds=trr.duration_seconds,
+        tests_executed=trr.total_tests,
+        output_excerpt=trr.raw_output[-4000:],
+    )
+    if trr.timed_out:
+        check.outcome, check.summary = CheckOutcome.ERROR, "timed out"
+    elif trr.ok:
+        if trr.total_tests < 1:
+            check.outcome, check.summary = CheckOutcome.ERROR, "exit 0 but no tests executed"
+        elif expect_failure:
+            check.outcome = CheckOutcome.FAILED
+            check.summary = "bug not reproduced: tests passed before the patch"
+        else:
+            check.outcome = CheckOutcome.PASSED
+            check.summary = f"{trr.total_tests} test(s) passed"
+    elif trr.failed > 0 or trr.errors > 0:
+        failing = [f.test_name for f in trr.failures]
+        check.counterexamples = failing
+        if expect_failure:
+            check.outcome = CheckOutcome.PASSED
+            check.summary = f"failure reproduced ({trr.failed} failing test(s))"
+        else:
+            check.outcome = CheckOutcome.FAILED
+            check.summary = f"{trr.failed} failing test(s)"
+    else:
+        check.outcome = CheckOutcome.ERROR
+        check.summary = "execution problem: runner returned no test results"
+    return check
 
 
 class _NoModel:
@@ -261,6 +315,8 @@ class RepairPipeline:
         self.on_event = on_event
         # Feature 4: iteration_index -> SecurityScanResult (avoids touching Pydantic model)
         self._sast_results: dict[int, SecurityScanResult] = {}
+        # Language runner — resolved once per pipeline.run() call
+        self._runner = None
 
     def run(
         self,
@@ -282,6 +338,7 @@ class RepairPipeline:
         )
         from app.runners.detector import detect_language
         cert.language = str(detect_language(source))
+        self._runner = get_language_runner(source)
 
         self._sast_results = {}  # reset for each pipeline.run() call
 
@@ -492,9 +549,10 @@ class RepairPipeline:
                     _skipped("regression", reason), _skipped("adversarial", reason),
                 ]  # fmt: skip
 
-            green = run_pytest_check(
-                self.sandbox, ws, name="reproduction_green", targets=repro_targets
+            _trr_green = self._runner.reproduce_bug(
+                self.sandbox, ws, targets=repro_targets or None
             )
+            green = _trr_to_check(_trr_green, name="reproduction_green", expect_failure=False)
             event("verifying", f"reproduction_green: {green.outcome.value} - {green.summary}")
             regression = self._regression(ws)
             event("verifying", f"regression: {regression.outcome.value} - {regression.summary}")
@@ -529,12 +587,16 @@ class RepairPipeline:
         event("reproducing", "running original reproduction before any patch")
         ws0 = self.sandbox.prepare_workspace(source)
         try:
-            red = run_pytest_check(
-                self.sandbox, ws0, name="reproduction_red", targets=repro_targets,
+            _trr_red = self._runner.reproduce_bug(
+                self.sandbox, ws0, targets=repro_targets or None,
+            )
+            red = _trr_to_check(
+                _trr_red, name="reproduction_red",
                 role=CheckRole.PRECONDITION, expect_failure=True,
-            )  # fmt: skip
+            )
             self._baseline = (
-                run_suite(self.sandbox, ws0) if red.outcome == CheckOutcome.PASSED else None
+                run_suite(self.sandbox, ws0, runner=self._runner)
+                if red.outcome == CheckOutcome.PASSED else None
             )
             self._test_files = [t.split("::", 1)[0] for t in repro_targets]
             self._focus_text = red.output_excerpt
@@ -597,6 +659,7 @@ class RepairPipeline:
             "test(s); no model calls",
         )
         self._spec_corpus = build_spec_corpus(issue, source)
+        self._runner = get_language_runner(source)
         red, _ = self._reproduce(source, repro_targets, event)
         cert.checks = [red]
         if red.outcome != CheckOutcome.PASSED:
@@ -668,7 +731,7 @@ class RepairPipeline:
     def _regression(self, ws: Path) -> CheckResult:
         """Full suite after the patch, judged against the pre-patch baseline."""
         baseline = self._baseline
-        after = run_suite(self.sandbox, ws)
+        after = run_suite(self.sandbox, ws, runner=self._runner)
         check = CheckResult(
             name="regression", command=after.command, exit_code=after.exit_code,
             duration_seconds=after.duration_seconds, tests_executed=after.executed,

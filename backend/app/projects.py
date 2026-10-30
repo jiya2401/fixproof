@@ -1,4 +1,4 @@
-"""Intake of user projects: zip upload, GitHub URL, or an allow-listed local folder.
+﻿"""Intake of user projects: zip upload, GitHub URL, or an allow-listed local folder.
 
 Everything here treats the project as hostile data: archives are extracted with path/size/symlink
 checks, git is run without hooks/submodules/credentials, local paths must live under an
@@ -208,8 +208,10 @@ class ProjectStore:
             has_pkg_json = (src / "package.json").exists()
             if info.python_files == 0 and not has_go_mod and not has_pkg_json:
                 raise ProjectError(
-                    "no Python files found; for JavaScript/TypeScript include package.json,"
-                    " or for Go include go.mod"
+                    "no recognisable source files found. "
+                    "For Python: include .py files. "
+                    "For Go: include go.mod. "
+                    "For JavaScript/TypeScript: include package.json."
                 )
         except ProjectError:
             _rmtree(self._slot(info))
