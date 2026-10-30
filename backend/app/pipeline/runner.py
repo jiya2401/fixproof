@@ -280,9 +280,6 @@ class RepairPipeline:
             sandbox=self.sandbox.describe(),
             max_iterations=self.max_iterations,
         )
-        from app.runners.detector import detect_language
-
-        cert.language = str(detect_language(source))
 
         self._sast_results = {}  # reset for each pipeline.run() call
 

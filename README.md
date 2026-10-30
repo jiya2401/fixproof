@@ -66,28 +66,23 @@ Only patches that clear every gate receive a **Fix Certificate** — a tamper-ev
 
 - **`sync_worker.py`** — a zero-dependency CLI watcher (`watchdog`) that monitors your local project directory recursively. A 300 ms debounce buffer coalesces burst saves (Ctrl+S in your editor) into a single HTTP POST to the backend.
   - Ignores: `.git`, `__pycache__`, `node_modules`, `.venv`, `.fixproof_projects`, editor temporaries (`.swp`, `.tmp`, `~`, `.DS_Store`).
-  - Works with Python, TypeScript, and Go source trees — the runner is auto-detected by the backend.
+  - Works with Python source trees — hot-reloads and executes tests inside the sandbox via pytest.
 - **`POST /api/v1/project/sync`** — receives the file delta, writes it atomically to the project workspace (with strict path-traversal protection), triggers a sandboxed test run, and broadcasts two WebSocket events: `TESTS_RE_RUNNING` → `RUN_COMPLETE`.
 - **`WebSocket /api/v1/ws/sync`** — a persistent channel. The React frontend connects on load; `SyncConnectionManager` broadcasts to all active subscribers without blocking the HTTP layer.
 - The entire loop — file save → sync POST → test run → WS broadcast — completes in under two seconds on local hardware for typical Python/JS projects.
 
-### 🌐 Multi-Runtime Factory
+### 🐍 Core Python & Pytest Toolchain
 
-All three runtimes conform to the same `LanguageRunner` interface: `run_tests()`, `reproduce_bug()`, `install_deps()`. A single factory call auto-detects the project language from filesystem signatures and returns the right runner — no configuration file required.
+FixProof is built on a hyper-optimized, rock-solid Python and pytest pipeline:
 
-| Language | Detector signal | Runner | Output format |
-|---|---|---|---|
-| **Python** | any `*.py` file | `PythonRunner` → `pytest --junitxml` | JUnit XML |
-| **JavaScript / TypeScript** | `package.json` | `JSRunner` → `npx vitest run --reporter=json` | Vitest JSON |
-| **Go** | `go.mod` | `GoRunner` → `go test -json ./...` | NDJSON stream |
+| Component | Invocations | Purpose |
+|---|---|---|
+| **Pre-pass scan** | `pytest --collect-only` | Rapid missing-dependency detection in ≤ 30s |
+| **Full suite run** | `pytest --continue-on-collection-errors -o junit_family=xunit1 --junitxml=...` | Baseline & regression verification |
+| **Reproduction** | `pytest <repro_target> -o junit_family=xunit1` | Pre-patch failure confirmation & post-patch green check |
+| **Adversarial tests** | Isolated temporary directory `fixproof_adv/` | Spec-grounded attack tests authored by the model |
 
-Detection priority: `go.mod` > `package.json` > `*.py` > Python (fallback). The detector scans at depth ≤ 2 to prevent false positives from vendored sub-modules.
-
-**NDJSON streaming parser** (`parsers/gotest_parser.py`) — parses `go test -json` output line by line, accumulates per-test output buffers, extracts file+line references from `--- FAIL` annotations, and produces a normalized `TestRunResult`. Malformed lines are silently skipped; the parser never raises.
-
-**Vitest JSON parser** (`parsers/vitest_parser.py`) — maps Vitest's single-blob JSON to the same `TestRunResult` schema, including per-assertion failure messages and line numbers from `location` objects.
-
-**Boundary protection map** (`boundary.py`) — classifies every file in a project into `editable` or `locked` before a repair attempt. Test files, config manifests (`go.mod`, `package.json`, `conftest.py`), and lock files are always locked. The AI patch is rejected if it touches a locked path.
+**Scope boundary validation** (`patching.py`) — ensures patches touch only project implementation files. Test files, configuration files (`conftest.py`, `pyproject.toml`, `setup.cfg`), and hidden directories are strictly protected from modification.
 
 ### 🛡️ Security Perimeter — Differential SAST Engine
 
@@ -140,11 +135,9 @@ The scanner tracks import aliases across `import X as Y` and `from X import Y as
 | **Verdict policy v1**, sealed tamper-evident Fix Certificate, certificate UI | ✅ |
 | **Process sandbox** — scrubbed env, rlimits, timeout, network namespace | ✅ tested; **no filesystem isolation** |
 | **Docker sandbox** — `--network none`, read-only, non-root, cap-drop | 🟡 code + test coverage; never run against a live Docker daemon |
-| **Multi-Language Factory** — Python (pytest), JS/TS (Vitest), Go (go test) | ✅ |
-| **NDJSON streaming parser** for `go test -json` output | ✅ |
-| **Vitest JSON parser** for `npx vitest run --reporter=json` output | ✅ |
-| **Language auto-detection** from filesystem signatures (`go.mod` / `package.json` / `*.py`) | ✅ |
-| **Boundary protection map** — test/config files locked; enforced across all three runtimes | ✅ |
+| **Deterministic Python/Pytest Pipeline** — pre-pass, baseline, reproduction, regression | ✅ |
+| **JUnit XML streaming parser** — outcome normalization, test node ID resolution | ✅ |
+| **Scope boundary protection** — test/config files locked; patches strictly confined | ✅ |
 | **Differential SAST Security Scan** — pure-Python AST engine, rules B101–B203 | ✅ |
 | **Real-time WebSocket Live Local File Sync** — `sync_worker.py` + `POST /project/sync` + `WS /ws/sync` | ✅ |
 | **Automated GitHub PR via Git Data API** — branch, apply, commit, push, PR body | ✅ |
@@ -300,7 +293,6 @@ The entire backend is covered by a dedicated test module for every major subsyst
 | Test module | Subsystem | What is verified |
 |---|---|---|
 | `test_security.py` | Differential SAST Engine | All 6 rule classes (B101–B203) with true-positive and true-negative cases; multi-file directory scan; baseline vs post-patch delta comparison; fail-open behaviour on scanner exceptions; `SecurityScanResult` schema; `VulnerabilityFinding.fingerprint()` stability |
-| `test_multi_lang.py` | Multi-Language Factory | Language auto-detection for Python / JS / Go and all fallback/priority edge cases; boundary map disjointness; Vitest JSON parser (all-pass, failures, line numbers, malformed input); `go test -json` NDJSON parser (pass/fail/file+line extraction, partial lines); factory returns correct runner for each language; `ProjectStore._finish()` accepts JS and Go stubs |
 | `test_sync.py` | Live Local File Sync | `sync_worker.py` ignore filters (systemic dirs, temp files, hidden files); debounce coalescing (3 rapid events → 1 dispatch); `POST /project/sync` writes file + runs tests + returns result; file deletion flow; path-traversal protection (400 on `../../`); WebSocket connection lifecycle; `SyncConnectionManager.broadcast()` delivers to all subscribers |
 | `test_github_pr.py` | Git Data API / PR Engine | Full PR lifecycle against an in-memory PyGithub stand-in; branch name collision retry; existing-PR reuse (`reused=True`); all stable error codes (`TOKEN_EXPIRED`, `PATCH_CONFLICT`, `RATE_LIMITED`, `SSO_REQUIRED`, `INSUFFICIENT_PERMISSIONS`, `NOT_FOUND`, `BRANCH_CONFLICT`, `REPO_ARCHIVED`); PR body construction (root cause, adversarial test table, evidence table, conditions, footer); `@mention` defanging in model-authored text |
 | `test_patching.py` | Patch Scope Validation | `git apply` integration; traversal rejection; test-file edit rejection; config-file edit rejection; `touched_paths()` extraction |
@@ -314,7 +306,7 @@ The entire backend is covered by a dedicated test module for every major subsyst
 | `test_contest.py` | Contradictory Attack Detection | Cross-attempt conflict detection; least-bad attempt selection |
 | `test_llm_client.py` | Nebius Client | Retry logic; JSON validation; usage accumulation |
 | `test_suite.py` | JUnit XML Parser | pytest exit-code mapping; failure extraction; edge cases (empty suites, malformed XML) |
-| `test_parsing.py` | NDJSON / Vitest Parsing | Shared parser edge cases |
+| `test_parsing.py` | Agent Response Parsing | Patch and adversarial test reply extraction |
 | `test_scan.py` | Project Scan | Failing-test discovery; repro target validation |
 | `test_projects.py` | Project Store | Zip upload; git clone; local path allowlist enforcement |
 | `test_eval_cases.py` | Benchmark Harness | Case loading; oracle validation |
@@ -432,7 +424,7 @@ See [`docs/verification-policy.md`](docs/verification-policy.md) for the full po
 | AI model | NVIDIA Nemotron via Nebius Token Factory |
 | Backend | Python 3.12, FastAPI, Pydantic v2 / pydantic-settings |
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS v4 |
-| Test runners | pytest (JUnit XML), Vitest (JSON), go test (NDJSON) |
+| Test runners | pytest (JUnit XML) |
 | Code analysis | Python `ast` (built-in), NetworkX |
 | GitHub integration | PyGithub (Git Data API) |
 | File watching | watchdog |
