@@ -85,7 +85,7 @@ export default function CertificateView({
   const [copied, setCopied] = useState<string | null>(null)
   const [syncStatus, setSyncStatus] = useState<'running' | 'complete' | null>(null)
   const [syncFile, setSyncFile] = useState<string | null>(null)
-  const [syncLang, setSyncLang] = useState<string>('python')
+  const [syncLang, setSyncLang] = useState<string>(cert.language ?? project?.language ?? 'python')
   const [syncResult, setSyncResult] = useState<any>(null)
   const v = VERDICTS[cert.verdict]
 

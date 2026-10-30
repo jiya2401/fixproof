@@ -166,7 +166,7 @@ export default function ProjectSource({
 function Limits() {
   return (
     <p className="mt-4 text-xs leading-relaxed text-zinc-500">
-      <span className="text-zinc-400">What works today:</span> Python (pytest), Go (go&amp;nbsp;test),
+      <span className="text-zinc-400">What works today:</span> Python (pytest), Go (go test),
       and JavaScript/TypeScript (Vitest) projects. The sandbox is offline — dependencies must be
       pre-installed in the sandbox image. Missing packages are detected and reported with the exact fix.
     </p>

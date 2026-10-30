@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { scanProject, type ScanResult } from '../api'
 import type { Source } from '../types'
 import { Alert, Button, Card, ErrorBanner, Pill, SectionTitle, Spinner, Stat } from '../ui'
@@ -51,7 +51,7 @@ export default function ScanStep({
             </h2>
             {source.kind === 'project' && (
               <p className="mt-1 text-xs text-zinc-500">
-                {source.info.files} source files{source.info.language ?  · Detected  workspace : ''} · {source.info.test_files} test file{source.info.test_files !== 1 ? 's' : ''} · from {source.info.origin}
+                {source.info.files} source files{source.info.language ? ` · Detected ${source.info.language} workspace` : ""} · {source.info.test_files} test file{source.info.test_files !== 1 ? "s" : ""} · from {source.info.origin}
               </p>
             )}
           </div>
