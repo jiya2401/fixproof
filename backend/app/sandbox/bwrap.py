@@ -44,10 +44,15 @@ class BwrapSandbox(SandboxRunner):
         probe = subprocess.run(
             [
                 bwrap_path,
-                "--ro-bind", "/", "/",
-                "--proc", "/proc",
-                "--dev", "/dev",
-                "--tmpfs", "/tmp",
+                "--ro-bind",
+                "/",
+                "/",
+                "--proc",
+                "/proc",
+                "--dev",
+                "/dev",
+                "--tmpfs",
+                "/tmp",
                 "--unshare-all",
                 "--die-with-parent",
                 "--new-session",
@@ -71,10 +76,15 @@ class BwrapSandbox(SandboxRunner):
         cmd = [sys.executable if command[0] == "python" else command[0], *command[1:]]
         argv = [
             self._bwrap,
-            "--ro-bind", "/", "/",          # read-only root filesystem
-            "--proc", "/proc",              # private fresh /proc
-            "--dev", "/dev",                # private fresh /dev
-            "--tmpfs", "/tmp",              # private writable /tmp
+            "--ro-bind",
+            "/",
+            "/",  # read-only root filesystem
+            "--proc",
+            "/proc",  # private fresh /proc
+            "--dev",
+            "/dev",  # private fresh /dev
+            "--tmpfs",
+            "/tmp",  # private writable /tmp
         ]
         # Only mask /app if it exists on the host (e.g. inside the Docker production container).
         # On hosts where /app does not exist, mounting a tmpfs over a non-existent path
@@ -83,22 +93,39 @@ class BwrapSandbox(SandboxRunner):
         if os.path.exists("/app"):
             argv.extend(["--tmpfs", "/app"])
 
-        argv.extend([
-            "--bind", str(workspace), "/tmp/work",  # isolated workspace writable in tmpfs
-            "--chdir", "/tmp/work",
-            "--unshare-all",                # user, mount, net, pid, ipc, uts isolation
-            "--die-with-parent",
-            "--new-session",
-            "--clearenv",                   # scrub all host environment variables
-            "--setenv", "PATH", "/usr/local/bin:/usr/bin:/bin",
-            "--setenv", "HOME", "/tmp",
-            "--setenv", "LANG", "C.UTF-8",
-            "--setenv", "PYTHONDONTWRITEBYTECODE", "1",
-            "--setenv", "PYTHONHASHSEED", "0",
-            "--setenv", "PYTHONPATH", "/tmp/work:/tmp/work/src",
-            "--",
-            *cmd,
-        ])
+        argv.extend(
+            [
+                "--bind",
+                str(workspace),
+                "/tmp/work",  # isolated workspace writable in tmpfs
+                "--chdir",
+                "/tmp/work",
+                "--unshare-all",  # user, mount, net, pid, ipc, uts isolation
+                "--die-with-parent",
+                "--new-session",
+                "--clearenv",  # scrub all host environment variables
+                "--setenv",
+                "PATH",
+                "/usr/local/bin:/usr/bin:/bin",
+                "--setenv",
+                "HOME",
+                "/tmp",
+                "--setenv",
+                "LANG",
+                "C.UTF-8",
+                "--setenv",
+                "PYTHONDONTWRITEBYTECODE",
+                "1",
+                "--setenv",
+                "PYTHONHASHSEED",
+                "0",
+                "--setenv",
+                "PYTHONPATH",
+                "/tmp/work:/tmp/work/src",
+                "--",
+                *cmd,
+            ]
+        )
         return argv
 
     def prepare_workspace(self, source: Path) -> Path:
@@ -161,27 +188,35 @@ class BwrapSandbox(SandboxRunner):
                     "network is blocked": [
                         "python",
                         "-c",
-                        ("import socket,sys\ntry:\n"
-                        " socket.create_connection(('1.1.1.1',53),2)\n"
-                        " sys.exit(1)\nexcept OSError:\n sys.exit(0)"),
+                        (
+                            "import socket,sys\ntry:\n"
+                            " socket.create_connection(('1.1.1.1',53),2)\n"
+                            " sys.exit(1)\nexcept OSError:\n sys.exit(0)"
+                        ),
                     ],
                     "filesystem root is read-only": [
                         "python",
                         "-c",
-                        ("import sys\ntry:\n open('/etc/fixproof_probe','w').close()\n"
-                        " sys.exit(1)\nexcept OSError:\n sys.exit(0)"),
+                        (
+                            "import sys\ntry:\n open('/etc/fixproof_probe','w').close()\n"
+                            " sys.exit(1)\nexcept OSError:\n sys.exit(0)"
+                        ),
                     ],
                     "backend source is hidden": [
                         "python",
                         "-c",
-                        ("import os,sys\n"
-                        "sys.exit(1 if os.path.exists('/app') and os.listdir('/app') else 0)"),
+                        (
+                            "import os,sys\n"
+                            "sys.exit(1 if os.path.exists('/app') and os.listdir('/app') else 0)"
+                        ),
                     ],
                     "host environment is not visible": [
                         "python",
                         "-c",
-                        ("import os,sys\nsys.exit(1 if 'NEBIUS_API_KEY' in os.environ or "
-                        "'FIXPROOF_GITHUB_TOKEN' in os.environ else 0)"),
+                        (
+                            "import os,sys\nsys.exit(1 if 'NEBIUS_API_KEY' in os.environ or "
+                            "'FIXPROOF_GITHUB_TOKEN' in os.environ else 0)"
+                        ),
                     ],
                 }
                 for label, cmd in probes.items():
@@ -199,8 +234,10 @@ class BwrapSandbox(SandboxRunner):
     def describe(self) -> SandboxInfo:
         notes = [
             "bubblewrap namespace sandbox: mount, network, PID, UTS, IPC isolation.",
-            ("Root filesystem read-only; /app hidden via tmpfs (when present); "
-             "workspace at /tmp/work."),
+            (
+                "Root filesystem read-only; /app hidden via tmpfs (when present); "
+                "workspace at /tmp/work."
+            ),
             "Environment completely cleared (--clearenv); no host variables visible.",
         ]
         if not self._self_tested:

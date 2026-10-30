@@ -51,7 +51,7 @@ export default function ScanStep({
             </h2>
             {source.kind === 'project' && (
               <p className="mt-1 text-xs text-zinc-500">
-                {source.info.files} source files{source.info.language ? ` · Detected ${source.info.language} workspace` : ""} · {source.info.test_files} test file{source.info.test_files !== 1 ? "s" : ""} · from {source.info.origin}
+                {source.info.python_files} Python files · {source.info.test_files} test files · from {source.info.origin}
               </p>
             )}
           </div>
@@ -111,7 +111,7 @@ export default function ScanStep({
               <label className="block text-sm text-zinc-300">
                 Or enter a test id yourself
                 <input value={manual} onChange={(e) => setManual(e.target.value)}
-                  placeholder="tests/test_orders.py::test_total  or  ./pkg/...  or  src/math.test.ts"
+                  placeholder="tests/test_orders.py::test_total_with_discount"
                   className="mono mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3.5 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:border-[var(--accent)] focus:outline-none" />
               </label>
             </div>

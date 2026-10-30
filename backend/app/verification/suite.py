@@ -1,4 +1,4 @@
-﻿"""Whole-suite runs with per-test outcomes, and baseline-aware regression comparison.
+"""Whole-suite runs with per-test outcomes, and baseline-aware regression comparison.
 
 Real projects already have failing tests. A patch must not be blamed for those, but it must not
 break anything that used to pass. So the full suite is run once before the patch (baseline) and
@@ -78,60 +78,22 @@ def parse_outcomes(path: Path) -> dict[str, str]:
     return outcomes
 
 
-def run_suite(
-    sandbox: SandboxRunner,
-    workspace: Path,
-    timeout_seconds: int = 180,
-    runner=None,
-) -> SuiteRun:
-    """Run the full test suite and return a :class:`SuiteRun` for regression comparison.
-
-    When *runner* is ``None`` the language is detected from *workspace* automatically
-    via :func:`~app.runners.get_language_runner`.
-    """
-    if runner is None:
-        from app.runners import get_language_runner
-        runner = get_language_runner(workspace)
-
-    from app.runners.detector import Language
-
-    if runner.language == Language.PYTHON:
-        result = sandbox.run(
-            workspace,
-            [
-                "python", "-m", "pytest", "-q", "-p", "no:cacheprovider",
-                "--continue-on-collection-errors", "-o", "junit_family=xunit1",
-                f"--junitxml={JUNIT}",
-            ],
-            timeout_seconds=timeout_seconds,
-        )
-        return SuiteRun(
-            exit_code=result.exit_code,
-            timed_out=result.timed_out,
-            duration_seconds=round(result.duration_seconds, 3),
-            outcomes=parse_outcomes(workspace / JUNIT),
-            command=result.command,
-            stdout_sha256=hashlib.sha256(result.stdout.encode()).hexdigest(),
-            excerpt=(result.stdout + "\n" + result.stderr).strip()[-4000:],
-        )
-    else:
-        trr = runner.run_tests(sandbox, workspace, timeout_seconds=timeout_seconds)
-        outcomes: dict[str, str] = {}
-        for f in trr.failures:
-            name = f.test_name
-            outcomes[name] = "error" if name.startswith("(setup)") else "failed"
-        for i in range(max(0, trr.passed)):
-            outcomes.setdefault(f"__passed_{i}", "passed")
-        inferred_exit = 0 if trr.ok else (1 if not trr.timed_out else -1)
-        return SuiteRun(
-            exit_code=inferred_exit,
-            timed_out=trr.timed_out,
-            duration_seconds=round(trr.duration_seconds, 3),
-            outcomes=outcomes,
-            command="",
-            stdout_sha256=hashlib.sha256(trr.raw_output.encode()).hexdigest(),
-            excerpt=trr.raw_output[-4000:],
-        )
+def run_suite(sandbox: SandboxRunner, workspace: Path, timeout_seconds: int = 180) -> SuiteRun:
+    result = sandbox.run(
+        workspace,
+        [
+            "python", "-m", "pytest", "-q", "-p", "no:cacheprovider",
+            "--continue-on-collection-errors", "-o", "junit_family=xunit1", f"--junitxml={JUNIT}",
+        ],
+        timeout_seconds=timeout_seconds,
+    )  # fmt: skip
+    return SuiteRun(
+        exit_code=result.exit_code, timed_out=result.timed_out,
+        duration_seconds=round(result.duration_seconds, 3),
+        outcomes=parse_outcomes(workspace / JUNIT), command=result.command,
+        stdout_sha256=hashlib.sha256(result.stdout.encode()).hexdigest(),
+        excerpt=(result.stdout + "\n" + result.stderr).strip()[-4000:],
+    )  # fmt: skip
 
 
 def compare(before: SuiteRun, after: SuiteRun) -> SuiteDiff:

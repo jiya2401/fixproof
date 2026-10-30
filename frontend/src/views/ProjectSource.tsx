@@ -71,7 +71,7 @@ export default function ProjectSource({
               drag ? 'border-[var(--accent)] bg-[var(--accent)]/5' : 'border-white/15'}`}>
             {busy ? <Spinner className="h-8 w-8 text-[var(--accent)]" /> : <Upload className="h-8 w-8 text-zinc-400" />}
             <p className="mt-4 text-base font-medium text-zinc-100">
-              {busy ? 'Unpacking safely…' : 'Drop a .zip of your project here'}
+              {busy ? 'Unpacking safely…' : 'Drop a .zip of your Python project here'}
             </p>
             <p className="mt-1 text-sm text-zinc-500">
               Up to {about?.max_project_mb ?? 50} MB. Zip the project folder (the one containing your tests).
@@ -166,9 +166,9 @@ export default function ProjectSource({
 function Limits() {
   return (
     <p className="mt-4 text-xs leading-relaxed text-zinc-500">
-      <span className="text-zinc-400">What works today:</span> Python (pytest), Go (go test),
-      and JavaScript/TypeScript (Vitest) projects. The sandbox is offline — dependencies must be
-      pre-installed in the sandbox image. Missing packages are detected and reported with the exact fix.
+      <span className="text-zinc-400">What works today:</span> Python projects tested with pytest whose
+      imports are the standard library or packages baked into the sandbox image (the sandbox is offline).
+      Missing packages are detected and reported with the exact fix.
     </p>
   )
 }

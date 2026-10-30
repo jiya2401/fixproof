@@ -1,4 +1,4 @@
-﻿"""Tests for BwrapSandbox and its factory integration."""
+"""Tests for BwrapSandbox and its factory integration."""
 
 import os
 import shutil
@@ -48,8 +48,10 @@ def test_bwrap_user_ns_probe_failure_raises() -> None:
     fake_result = MagicMock()
     fake_result.returncode = 1
     fake_result.stderr = b"bwrap: No user namespaces allowed"
-    with patch("shutil.which", return_value="/usr/bin/bwrap"), \
-         patch("subprocess.run", return_value=fake_result):
+    with (
+        patch("shutil.which", return_value="/usr/bin/bwrap"),
+        patch("subprocess.run", return_value=fake_result),
+    ):
         with pytest.raises(BwrapUnavailable, match="user namespaces"):
             BwrapSandbox()
 
@@ -61,6 +63,7 @@ def test_factory_resolves_bwrap_and_calls_self_test(monkeypatch) -> None:
     monkeypatch.setenv("FIXPROOF_SANDBOX_MODE", "bwrap")
     # Clear lru_cache on get_settings so new env is read
     from app.config import get_settings
+
     get_settings.cache_clear()
 
     with patch("app.sandbox.bwrap.BwrapSandbox", return_value=fake_sandbox):
@@ -72,6 +75,7 @@ def test_factory_resolves_bwrap_and_calls_self_test(monkeypatch) -> None:
 def test_factory_bwrap_unavailable_raises_sandbox_unavailable(monkeypatch) -> None:
     monkeypatch.setenv("FIXPROOF_SANDBOX_MODE", "bwrap")
     from app.config import get_settings
+
     get_settings.cache_clear()
 
     with patch("app.sandbox.bwrap.BwrapSandbox", side_effect=BwrapUnavailable("bwrap not found")):
@@ -85,6 +89,7 @@ def test_factory_bwrap_failed_self_test_refuses_to_start(monkeypatch) -> None:
 
     monkeypatch.setenv("FIXPROOF_SANDBOX_MODE", "bwrap")
     from app.config import get_settings
+
     get_settings.cache_clear()
 
     with patch("app.sandbox.bwrap.BwrapSandbox", return_value=fake_sandbox):
@@ -95,6 +100,7 @@ def test_factory_bwrap_failed_self_test_refuses_to_start(monkeypatch) -> None:
 def test_factory_rejects_unsupported_mode(monkeypatch) -> None:
     monkeypatch.setenv("FIXPROOF_SANDBOX_MODE", "invalid-mode")
     from app.config import get_settings
+
     get_settings.cache_clear()
 
     with pytest.raises(SandboxUnavailable, match="Unsupported FIXPROOF_SANDBOX_MODE"):
@@ -123,8 +129,10 @@ def test_bwrap_network_is_blocked(tmp_path: Path) -> None:
             [
                 "python",
                 "-c",
-                ("import socket,sys\ntry:\n socket.create_connection(('1.1.1.1',53),2)"
-                 "\n sys.exit(1)\nexcept OSError:\n sys.exit(0)"),
+                (
+                    "import socket,sys\ntry:\n socket.create_connection(('1.1.1.1',53),2)"
+                    "\n sys.exit(1)\nexcept OSError:\n sys.exit(0)"
+                ),
             ],
         )
         assert result.passed, f"Network should be blocked: {result.stderr}"
@@ -144,11 +152,12 @@ def test_bwrap_env_is_cleared(tmp_path: Path, monkeypatch) -> None:
             [
                 "python",
                 "-c",
-                ("import os,sys\nsys.exit(1 if 'NEBIUS_API_KEY' in os.environ or "
-                 "'FIXPROOF_GITHUB_TOKEN' in os.environ else 0)"),
+                (
+                    "import os,sys\nsys.exit(1 if 'NEBIUS_API_KEY' in os.environ or "
+                    "'FIXPROOF_GITHUB_TOKEN' in os.environ else 0)"
+                ),
             ],
         )
         assert result.passed, "Host secrets must be stripped from sandbox environment"
     finally:
         sandbox.destroy(ws)
-

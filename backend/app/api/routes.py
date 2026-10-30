@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -34,10 +34,10 @@ from app.llm.nebius import NebiusConfigurationError
 from app.orchestrator.state import InvestigationStage, InvestigationState
 from app.pipeline import factory
 from app.projects import ProjectError, ProjectInfo, ProjectStore
-from app.runners import get_language_runner
 from app.sandbox.factory import SandboxUnavailable, get_sandbox
 from app.verification.results import CheckOutcome
 from app.verification.scan import ScanResult, TargetError, scan_project, validate_repro_targets
+from app.verification.suite import run_suite
 
 logger = logging.getLogger("fixproof.routes")
 
@@ -294,8 +294,27 @@ def _resolve_sync_project(project_id: str | None) -> tuple[str, Path]:
     raise HTTPException(status_code=404, detail="No active project found to sync")
 
 
+def _run_sync_tests(sandbox: Any, source: Path) -> dict[str, Any]:
+    suite = run_suite(sandbox, source)
+    failures = [
+        {"test_name": node, "message": outcome, "file": node.split("::")[0], "line": None}
+        for node, outcome in suite.outcomes.items()
+        if outcome in ("failed", "error")
+    ]
+    return {
+        "total_tests": len(suite.outcomes),
+        "passed": suite.count("passed"),
+        "failed": suite.count("failed"),
+        "errors": suite.count("error"),
+        "duration_seconds": suite.duration_seconds,
+        "timed_out": suite.timed_out,
+        "failures": failures,
+    }
+
+
 @router.post("/project/sync", response_model=ProjectSyncResponse)
 async def sync_project_file(payload: ProjectSyncRequest) -> ProjectSyncResponse:
+
     pid, source = _resolve_sync_project(payload.project_id)
     clean_rel = PurePosixPath(payload.file_path.replace("\\", "/").lstrip("/"))
     if ".." in clean_rel.parts or clean_rel.is_absolute():
@@ -323,11 +342,9 @@ async def sync_project_file(payload: ProjectSyncRequest) -> ProjectSyncResponse:
         }
     )
 
-    runner = get_language_runner(source)
     try:
         sandbox = get_sandbox()
-        test_run = await run_in_threadpool(runner.run_tests, sandbox, source)
-        test_dict = test_run.to_dict()
+        test_dict = await run_in_threadpool(_run_sync_tests, sandbox, source)
     except Exception as exc:
         test_dict = {
             "total_tests": 0,
@@ -351,7 +368,7 @@ async def sync_project_file(payload: ProjectSyncRequest) -> ProjectSyncResponse:
             "event": "RUN_COMPLETE",
             "project_id": pid,
             "file_path": str(clean_rel),
-            "language": runner.language.value,
+            "language": "python",
             "result": test_dict,
             "timestamp": datetime.now(UTC).isoformat(),
         }
@@ -362,9 +379,9 @@ async def sync_project_file(payload: ProjectSyncRequest) -> ProjectSyncResponse:
         project_id=pid,
         file_path=str(clean_rel),
         event_type=payload.event_type,
-        language=runner.language.value,
+        language="python",
         test_result=test_dict,
-        detail=f"Successfully synced {clean_rel} and executed {runner.language.value} tests",
+        detail=f"Successfully synced {clean_rel} and executed python tests",
     )
 
 

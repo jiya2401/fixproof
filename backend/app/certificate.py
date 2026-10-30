@@ -1,4 +1,4 @@
-﻿"""Typed, machine-readable Fix Certificate. Used unchanged by the API and the frontend."""
+"""Typed, machine-readable Fix Certificate. Used unchanged by the API and the frontend."""
 
 import hashlib
 import json

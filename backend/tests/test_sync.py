@@ -23,7 +23,6 @@ from fastapi.testclient import TestClient
 from app.api.routes import SyncConnectionManager
 from app.main import app
 from app.projects import ProjectInfo, ProjectStore
-from app.runners.schema import TestRunResult
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from sync_worker import DebouncedChangeHandler
@@ -131,16 +130,21 @@ class TestProjectSyncEndpoint:
         info, src, store = test_project
         client = TestClient(app)
 
-        mock_result = TestRunResult(total_tests=1, passed=1, failed=0, duration_seconds=0.1)
+        mock_result = {
+            "total_tests": 1,
+            "passed": 1,
+            "failed": 0,
+            "errors": 0,
+            "duration_seconds": 0.1,
+            "timed_out": False,
+            "failures": [],
+        }
 
-        with patch("app.api.routes._store", return_value=store), \
-             patch("app.api.routes.get_sandbox") as mock_get_sandbox, \
-             patch("app.api.routes.get_language_runner") as mock_get_runner:
-
-            runner_mock = MagicMock()
-            runner_mock.language.value = "python"
-            runner_mock.run_tests.return_value = mock_result
-            mock_get_runner.return_value = runner_mock
+        with (
+            patch("app.api.routes._store", return_value=store),
+            patch("app.api.routes.get_sandbox") as mock_get_sandbox,
+            patch("app.api.routes._run_sync_tests", return_value=mock_result),
+        ):
             mock_get_sandbox.return_value = MagicMock()
 
             resp = client.post(
@@ -173,17 +177,21 @@ class TestProjectSyncEndpoint:
         target_file.write_text("x = 1\n", encoding="utf-8")
         assert target_file.exists()
 
-        mock_result = TestRunResult(total_tests=1, passed=1, failed=0)
+        mock_result = {
+            "total_tests": 1,
+            "passed": 1,
+            "failed": 0,
+            "errors": 0,
+            "duration_seconds": 0.1,
+            "timed_out": False,
+            "failures": [],
+        }
 
-        with patch("app.api.routes._store", return_value=store), \
-             patch("app.api.routes.get_sandbox"), \
-             patch("app.api.routes.get_language_runner") as mock_get_runner:
-
-            runner_mock = MagicMock()
-            runner_mock.language.value = "python"
-            runner_mock.run_tests.return_value = mock_result
-            mock_get_runner.return_value = runner_mock
-
+        with (
+            patch("app.api.routes._store", return_value=store),
+            patch("app.api.routes.get_sandbox"),
+            patch("app.api.routes._run_sync_tests", return_value=mock_result),
+        ):
             resp = client.post(
                 "/api/v1/project/sync",
                 json={

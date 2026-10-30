@@ -85,7 +85,7 @@ export default function CertificateView({
   const [copied, setCopied] = useState<string | null>(null)
   const [syncStatus, setSyncStatus] = useState<'running' | 'complete' | null>(null)
   const [syncFile, setSyncFile] = useState<string | null>(null)
-  const [syncLang, setSyncLang] = useState<string>(cert.language ?? project?.language ?? 'python')
+  const [syncLang, setSyncLang] = useState<string>('python')
   const [syncResult, setSyncResult] = useState<any>(null)
   const v = VERDICTS[cert.verdict]
 
@@ -157,14 +157,9 @@ export default function CertificateView({
           <div className="flex items-start gap-4">
             <div className="rounded-2xl bg-black/30 p-3"><Shield className="h-8 w-8 text-white" /></div>
             <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="text-xs uppercase tracking-[0.2em] text-zinc-400">
-                  {project?.name || cert.source_label || 'Fix Certificate'} · policy v{cert.policy_version}
-                </p>
-                <span className="bg-zinc-800 border border-zinc-700 text-zinc-300 uppercase px-2 py-0.5 rounded-full text-xs font-mono font-medium">
-                  {cert.language ?? project?.language ?? 'python'}
-                </span>
-              </div>
+              <p className="text-xs uppercase tracking-[0.2em] text-zinc-400">
+                {project?.name || cert.source_label || 'Fix Certificate'} · policy v{cert.policy_version}
+              </p>
               <h2 id="verdict" className="mt-1 text-4xl font-semibold tracking-tight text-white">{v.label}</h2>
               <p className="mt-2 max-w-xl text-sm text-zinc-300">{v.line}</p>
             </div>

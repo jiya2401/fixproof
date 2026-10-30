@@ -1,4 +1,4 @@
-﻿from app.config import get_settings
+from app.config import get_settings
 from app.sandbox.base import SandboxRunner
 
 
