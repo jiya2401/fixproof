@@ -18,10 +18,11 @@ def test_bwrap_argv_contains_isolation_flags() -> None:
     sandbox._bwrap = "/usr/bin/bwrap"
     sandbox._self_tested = False
     ws = Path("/tmp/ws/repo")
-    argv = sandbox.bwrap_argv(ws, ["python", "-m", "pytest"])
-    joined = " ".join(argv)
+    with patch("os.path.exists", side_effect=lambda p: True if p == "/app" else os.path.exists(p)):
+        argv = sandbox.bwrap_argv(ws, ["python", "-m", "pytest"])
+        joined = " ".join(argv)
 
-    assert "--unshare-all" in joined
+        assert "--unshare-all" in joined
     assert "--clearenv" in joined
     assert "--tmpfs /tmp" in joined
     assert "--tmpfs /app" in joined

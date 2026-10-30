@@ -21,7 +21,7 @@ class BwrapSandbox(SandboxRunner):
     Provides genuine container-grade isolation without requiring a Docker daemon:
     - Mount namespace: host root mounted read-only (--ro-bind / /), fresh /proc and /dev,
       private empty tmpfs for /tmp, and /app is hidden via tmpfs to prevent reading backend
-      source or stored projects.
+      source or stored projects when /app exists on the host.
     - Network namespace: unshared (--unshare-all includes --unshare-net), blocking all
       outbound network connections.
     - PID, UTS, IPC namespaces: untrusted code runs isolated from other processes.
@@ -68,13 +68,20 @@ class BwrapSandbox(SandboxRunner):
 
     def bwrap_argv(self, workspace: Path, command: list[str]) -> list[str]:
         cmd = [sys.executable if command[0] == "python" else command[0], *command[1:]]
-        return [
+        argv = [
             self._bwrap,
             "--ro-bind", "/", "/",          # read-only root filesystem
             "--proc", "/proc",              # private fresh /proc
             "--dev", "/dev",                # private fresh /dev
             "--tmpfs", "/tmp",              # private writable /tmp
-            "--tmpfs", "/app",              # HIDE backend source code & secrets
+        ]
+        # Only mask /app if it exists on the host (e.g. inside the Docker production container).
+        # On hosts where /app does not exist, mounting a tmpfs over a non-existent path
+        # on a read-only root causes bwrap to fail with EROFS ("Can't mkdir /app: Read-only file system").
+        if os.path.exists("/app"):
+            argv.extend(["--tmpfs", "/app"])
+
+        argv.extend([
             "--bind", str(workspace), "/work",  # mount isolated workspace writable at /work
             "--chdir", "/work",
             "--unshare-all",                # user, mount, net, pid, ipc, uts isolation
@@ -89,7 +96,8 @@ class BwrapSandbox(SandboxRunner):
             "--setenv", "PYTHONPATH", "/work:/work/src",
             "--",
             *cmd,
-        ]
+        ])
+        return argv
 
     def prepare_workspace(self, source: Path) -> Path:
         destination = Path(tempfile.mkdtemp(prefix="fixproof-bwrap-")) / "repo"
@@ -184,7 +192,7 @@ class BwrapSandbox(SandboxRunner):
     def describe(self) -> SandboxInfo:
         notes = [
             "bubblewrap namespace sandbox: mount, network, PID, UTS, IPC isolation.",
-            "Root filesystem read-only; /app hidden via tmpfs; workspace at /work.",
+            "Root filesystem read-only; /app hidden via tmpfs (when present); workspace at /work.",
             "Environment completely cleared (--clearenv); no host variables visible.",
         ]
         if not self._self_tested:
@@ -196,4 +204,3 @@ class BwrapSandbox(SandboxRunner):
             isolation_self_tested=self._self_tested,
             notes=notes,
         )
-

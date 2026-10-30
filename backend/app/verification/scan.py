@@ -122,7 +122,7 @@ def scan_project(sandbox: SandboxRunner, source: Path, timeout_seconds: int = 18
     seen_failing: set[str] = set()
     seen_collection: set[str] = set()
 
-    # 1. Parse failures and collection errors from stdout
+    # Parse canonical pytest node IDs (file paths) from stdout
     for kind, node, message in _RESULT_LINE.findall(result.stdout):
         clean_node = node.replace("\\", "/")
         item = FailingTest(node_id=clean_node, message=message[:300])
@@ -134,23 +134,6 @@ def scan_project(sandbox: SandboxRunner, source: Path, timeout_seconds: int = 18
             if clean_node not in seen_collection:
                 seen_collection.add(clean_node)
                 collection.append(item)
-
-    # 2. Merge JUnit XML failures without duplicating
-    for bad_str in stats.get("failing", []):
-        parts = str(bad_str).split(": ", 1)
-        name = parts[0].replace("\\", "/")
-        msg = parts[1] if len(parts) > 1 else ""
-        if name not in seen_failing:
-            seen_failing.add(name)
-            failing.append(FailingTest(node_id=name, message=msg[:300]))
-
-    for err_str in stats.get("erroring", []):
-        parts = str(err_str).split(": ", 1)
-        name = parts[0].replace("\\", "/")
-        msg = parts[1] if len(parts) > 1 else ""
-        if name not in seen_collection:
-            seen_collection.add(name)
-            collection.append(FailingTest(node_id=name, message=msg[:300]))
 
     wanted = sorted({m.split(".")[0] for m in _MISSING_MODULE.findall(combined)})
     local = [m for m in wanted if _is_project_module(source, m)]
@@ -165,9 +148,9 @@ def scan_project(sandbox: SandboxRunner, source: Path, timeout_seconds: int = 18
         scan_status = "completed"
 
     junit_tests = int(stats["tests"])
-    effective_tests = max(junit_tests, len(failing) + len(collection))
-    effective_failed = max(int(stats["failures"]), len(failing))
-    effective_errors = max(int(stats["errors"]), len(collection))
+    effective_tests = junit_tests if junit_tests > 0 else (len(failing) + len(collection))
+    effective_failed = int(stats["failures"]) if junit_tests > 0 else len(failing)
+    effective_errors = int(stats["errors"]) if junit_tests > 0 else len(collection)
 
     scan = ScanResult(
         exit_code=result.exit_code,
