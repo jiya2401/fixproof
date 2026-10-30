@@ -87,47 +87,51 @@ def run_suite(
     """Run the full test suite and return a :class:`SuiteRun` for regression comparison.
 
     When *runner* is ``None`` the language is detected from *workspace* automatically
-    via :func:`~app.runners.get_language_runner`.  Pass the runner explicitly from
-    :class:`~app.pipeline.runner.RepairPipeline` to avoid a second filesystem scan.
+    via :func:`~app.runners.get_language_runner`.
     """
     if runner is None:
         from app.runners import get_language_runner
         runner = get_language_runner(workspace)
 
-    # Use the runner's run_tests() to get a normalised TestRunResult, then
-    # translate it into the SuiteRun schema the pipeline's regression check expects.
-    trr = runner.run_tests(sandbox, workspace, timeout_seconds=timeout_seconds)
+    from app.runners.detector import Language
 
-    # Build an outcomes dict: test_name -> "passed" | "failed" | "error"
-    outcomes: dict[str, str] = {}
-    for f in trr.failures:
-        name = f.test_name
-        outcomes[name] = "error" if name.startswith("(setup)") else "failed"
-
-    # For Python we additionally parse JUnit XML so that passing test names are recorded
-    # (TestRunResult only carries failing details, not the full per-test list).
-    if runner.language.value == "python":
-        for junit_candidate in (workspace / JUNIT, workspace / ".fixproof_junit.xml"):
-            if junit_candidate.exists():
-                for node, outcome in parse_outcomes(junit_candidate).items():
-                    outcomes.setdefault(node, outcome)
-                break
+    if runner.language == Language.PYTHON:
+        result = sandbox.run(
+            workspace,
+            [
+                "python", "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                "--continue-on-collection-errors", "-o", "junit_family=xunit1",
+                f"--junitxml={JUNIT}",
+            ],
+            timeout_seconds=timeout_seconds,
+        )
+        return SuiteRun(
+            exit_code=result.exit_code,
+            timed_out=result.timed_out,
+            duration_seconds=round(result.duration_seconds, 3),
+            outcomes=parse_outcomes(workspace / JUNIT),
+            command=result.command,
+            stdout_sha256=hashlib.sha256(result.stdout.encode()).hexdigest(),
+            excerpt=(result.stdout + "\n" + result.stderr).strip()[-4000:],
+        )
     else:
-        # For Go / JS, record anonymous passed slots so the baseline-vs-post diff
-        # notices when the passed-count drops (even without per-test names).
+        trr = runner.run_tests(sandbox, workspace, timeout_seconds=timeout_seconds)
+        outcomes: dict[str, str] = {}
+        for f in trr.failures:
+            name = f.test_name
+            outcomes[name] = "error" if name.startswith("(setup)") else "failed"
         for i in range(max(0, trr.passed)):
             outcomes.setdefault(f"__passed_{i}", "passed")
-
-    inferred_exit = 0 if trr.ok else (1 if not trr.timed_out else -1)
-    return SuiteRun(
-        exit_code=inferred_exit,
-        timed_out=trr.timed_out,
-        duration_seconds=round(trr.duration_seconds, 3),
-        outcomes=outcomes,
-        command="",
-        stdout_sha256=hashlib.sha256(trr.raw_output.encode()).hexdigest(),
-        excerpt=trr.raw_output[-4000:],
-    )
+        inferred_exit = 0 if trr.ok else (1 if not trr.timed_out else -1)
+        return SuiteRun(
+            exit_code=inferred_exit,
+            timed_out=trr.timed_out,
+            duration_seconds=round(trr.duration_seconds, 3),
+            outcomes=outcomes,
+            command="",
+            stdout_sha256=hashlib.sha256(trr.raw_output.encode()).hexdigest(),
+            excerpt=trr.raw_output[-4000:],
+        )
 
 
 def compare(before: SuiteRun, after: SuiteRun) -> SuiteDiff:

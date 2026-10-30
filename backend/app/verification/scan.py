@@ -15,6 +15,7 @@ logger = logging.getLogger("fixproof.scan")
 _RESULT_LINE = re.compile(r"^(FAILED|ERROR) (\S+)(?: - (.*))?$", re.MULTILINE)
 _MISSING_MODULE = re.compile(r"No module named '([\w.]+)'")
 MAX_TARGETS = 10
+_ALLOWED_TEST_SUFFIXES = {".py", ".go", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"}
 
 
 class FailingTest(BaseModel):
@@ -71,7 +72,11 @@ def validate_repro_targets(source: Path, targets: list[str]) -> list[str]:
         is_go_pattern = file_part.startswith("./") or file_part == "..."
         if not is_go_pattern:
             path = (root / file_part).resolve()
-            if root not in path.parents or not path.is_file():
+            if (
+                root not in path.parents
+                or path.suffix not in _ALLOWED_TEST_SUFFIXES
+                or not path.is_file()
+            ):
                 raise TargetError(f"test file not found in the project: {file_part}")
         clean.append(target.replace("\\", "/"))
     return clean
@@ -97,9 +102,8 @@ def scan_project(sandbox: SandboxRunner, source: Path, timeout_seconds: int = 18
     total_start = time.monotonic()
     logger.info("scan_project: starting scan for source=%s (timeout=%ds)", source, timeout_seconds)
 
-    # Detect language once — used for runner dispatch and human-readable hints.
     runner = get_language_runner(source)
-    runner_name = runner.language.value.capitalize()  # "Python" | "Go" | "Javascript"
+    runner_name = runner.language.value.capitalize()
     is_python = runner.language.value == "python"
     logger.info("scan_project: detected language=%s", runner.language.value)
 
@@ -114,8 +118,6 @@ def scan_project(sandbox: SandboxRunner, source: Path, timeout_seconds: int = 18
 
         if is_python:
             # ── Phase 1: fast collection-only pre-pass (Python only, ≤30 s) ─────────────
-            # Detects missing-module / import errors in a few seconds without burning the
-            # full timeout budget on a test run that cannot possibly succeed.
             collect_budget = min(30, max(10, timeout_seconds // 4))
             collect_start = time.monotonic()
             collect_result = sandbox.run(
@@ -143,50 +145,76 @@ def scan_project(sandbox: SandboxRunner, source: Path, timeout_seconds: int = 18
                 and not collect_result.timed_out
             )
 
-        if _all_collection_failures:
-            # Skip the full run — it would hit the same wall after burning the timeout.
-            logger.warning(
-                "scan_project: entire suite failed to collect (%d missing modules). "
-                "Skipping full test run.",
-                len(set(collect_missing)),
-            )
-            combined = ""
+            if _all_collection_failures:
+                logger.warning(
+                    "scan_project: entire suite failed to collect (%d missing modules). "
+                    "Skipping full test run.",
+                    len(set(collect_missing)),
+                )
+                result = collect_result
+                stats = {
+                    "tests": 0, "failures": 0, "errors": len(set(collect_missing)), "skipped": 0,
+                }
+            else:
+                elapsed_so_far = time.monotonic() - total_start
+                remaining_budget = max(10, timeout_seconds - int(elapsed_so_far) - 5)
+                junit = ".fixproof_junit_scan.xml"
+                result = sandbox.run(
+                    workspace,
+                    [
+                        "python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "--tb=short",
+                        "-rfE", "--maxfail=10", "--continue-on-collection-errors",
+                        f"--junitxml={junit}",
+                    ],
+                    timeout_seconds=remaining_budget,
+                )
+                from app.verification.pytest_runner import _junit_summary
+                stats = _junit_summary(workspace / junit)
+
+            combined = result.stdout + "\n" + result.stderr
             failing: list[FailingTest] = []
             collection: list[FailingTest] = []
-            trr_timed_out = False
-            trr_total = 0
-            trr_failed = 0
-            trr_errors = len(set(collect_missing))
-            trr_skipped = 0
-            raw_output = ""
-            scan_status = "completed"
+            seen_failing: set[str] = set()
+            seen_collection: set[str] = set()
+
+            for kind, node, message in _RESULT_LINE.findall(result.stdout):
+                clean_node = node.replace("\\", "/")
+                item = FailingTest(node_id=clean_node, message=message[:300])
+                if kind == "FAILED":
+                    if clean_node not in seen_failing:
+                        seen_failing.add(clean_node)
+                        failing.append(item)
+                else:
+                    if clean_node not in seen_collection:
+                        seen_collection.add(clean_node)
+                        collection.append(item)
+
+            if not collect_missing:
+                collect_missing = _MISSING_MODULE.findall(combined)
+
+            if result.timed_out:
+                scan_status = "partial" if failing else "timed_out"
+            elif result.exit_code in (125, 126, 127):
+                scan_status = "error"
+            else:
+                scan_status = "completed"
+
+            junit_tests = int(stats["tests"])
+            effective_tests = junit_tests if junit_tests > 0 else (len(failing) + len(collection))
+            effective_failed = int(stats["failures"]) if junit_tests > 0 else len(failing)
+            effective_errors = int(stats["errors"]) if junit_tests > 0 else len(collection)
+            effective_skipped = int(stats["skipped"])
+            exit_code = result.exit_code
             duration = round(time.monotonic() - total_start, 2)
+            raw_output = combined
+            is_timed_out = result.timed_out
         else:
-            # ── Phase 2: full test run via the language runner ──────────────────────────
             elapsed_so_far = time.monotonic() - total_start
             remaining_budget = max(10, timeout_seconds - int(elapsed_so_far) - 5)
-
-            run_start = time.monotonic()
             trr = runner.run_tests(sandbox, workspace, timeout_seconds=remaining_budget)
-            run_duration = time.monotonic() - run_start
-            logger.info(
-                "scan_project: runner execution finished in %.2fs (timed_out=%s, total=%d, "
-                "failed=%d, errors=%d)",
-                run_duration,
-                trr.timed_out,
-                trr.total_tests,
-                trr.failed,
-                trr.errors,
-            )
-
-            trr_timed_out = trr.timed_out
-            trr_total = trr.total_tests
-            trr_failed = trr.failed
-            trr_errors = trr.errors
-            trr_skipped = trr.total_tests - trr.passed - trr.failed - trr.errors
             raw_output = trr.raw_output
-
-            # Build FailingTest lists from structured TestRunResult.failures
+            combined = raw_output
+            collect_missing = []
             failing = [
                 FailingTest(node_id=f.test_name, message=(f.message or "")[:300])
                 for f in trr.failures
@@ -197,33 +225,19 @@ def scan_project(sandbox: SandboxRunner, source: Path, timeout_seconds: int = 18
                 for f in trr.failures
                 if f.test_name.startswith("(setup)")
             ]
-
-            # For Python, also scrape pytest FAILED/ERROR lines for richer node IDs
-            if is_python:
-                combined = raw_output
-                seen_failing: set[str] = {t.node_id for t in failing}
-                seen_collection: set[str] = {t.node_id for t in collection}
-                for kind, node, message in _RESULT_LINE.findall(trr.raw_output):
-                    clean_node = node.replace("\\", "/")
-                    item = FailingTest(node_id=clean_node, message=message[:300])
-                    if kind == "FAILED" and clean_node not in seen_failing:
-                        seen_failing.add(clean_node)
-                        failing.append(item)
-                    elif kind == "ERROR" and clean_node not in seen_collection:
-                        seen_collection.add(clean_node)
-                        collection.append(item)
-                collect_missing = _MISSING_MODULE.findall(combined)
-            else:
-                combined = raw_output
-
-            if trr_timed_out:
+            if trr.timed_out:
                 scan_status = "partial" if failing else "timed_out"
-            elif trr.errors > 0 and trr_total == 0:
+            elif trr.errors > 0 and trr.total_tests == 0:
                 scan_status = "error"
             else:
                 scan_status = "completed"
+            effective_tests = trr.total_tests
+            effective_failed = trr.failed
+            effective_errors = trr.errors
+            effective_skipped = max(0, trr.total_tests - trr.passed - trr.failed - trr.errors)
+            exit_code = 0 if trr.ok else (1 if not trr.timed_out else -1)
             duration = round(time.monotonic() - total_start, 2)
-
+            is_timed_out = trr.timed_out
     finally:
         cleanup_start = time.monotonic()
         sandbox.destroy(workspace)
@@ -234,20 +248,20 @@ def scan_project(sandbox: SandboxRunner, source: Path, timeout_seconds: int = 18
     missing = [m for m in wanted if m not in local]
 
     scan = ScanResult(
-        exit_code=None,
-        timed_out=trr_timed_out,
+        exit_code=exit_code,
+        timed_out=is_timed_out,
         status=scan_status,
         duration_seconds=duration,
-        tests=trr_total,
-        failed=trr_failed,
-        errors=trr_errors,
-        skipped=max(0, trr_skipped),
+        tests=effective_tests,
+        failed=effective_failed,
+        errors=effective_errors,
+        skipped=max(0, effective_skipped),
         failing_tests=failing,
         collection_errors=collection,
         missing_modules=missing,
         local_modules_unresolved=local,
         output_excerpt=(combined or raw_output).strip()[-3000:],
-    )  # fmt: skip
+    )
 
     if scan_status == "partial":
         scan.hint = (
@@ -282,12 +296,9 @@ def scan_project(sandbox: SandboxRunner, source: Path, timeout_seconds: int = 18
                 "pick a test that runs on its own, or use that sub-folder as the project."
             )
         scan.hint = " ".join(parts)
-    elif trr_total == 0:
-        scan.hint = (
-            f"{runner_name} collected no tests. "
-            "FixProof needs a failing test suite."
-        )
-    elif not trr_timed_out and trr_failed == 0 and trr_errors == 0:
+    elif (exit_code == 5 if exit_code is not None else False) or effective_tests == 0:
+        scan.hint = f"{runner_name} collected no tests. FixProof needs a failing test suite."
+    elif (not is_timed_out) and effective_failed == 0 and effective_errors == 0:
         scan.hint = "All tests pass, so there is no failing test to reproduce."
     elif not failing and collection:
         scan.hint = "Tests could not be collected (import or syntax errors). See the output below."

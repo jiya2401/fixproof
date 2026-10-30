@@ -208,10 +208,8 @@ class ProjectStore:
             has_pkg_json = (src / "package.json").exists()
             if info.python_files == 0 and not has_go_mod and not has_pkg_json:
                 raise ProjectError(
-                    "no recognisable source files found. "
-                    "For Python: include .py files. "
-                    "For Go: include go.mod. "
-                    "For JavaScript/TypeScript: include package.json."
+                    "no Python files found; for JavaScript/TypeScript include package.json,"
+                    " or for Go include go.mod"
                 )
         except ProjectError:
             _rmtree(self._slot(info))

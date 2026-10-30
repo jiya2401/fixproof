@@ -688,5 +688,5 @@ class TestProjectStoreMultiLang:
         # Write only a README — no code at all
         (src / "README.md").write_text("# empty")
 
-        with pytest.raises(ProjectError, match="no recognisable source files"):
+        with pytest.raises(ProjectError, match="no Python files"):
             store._finish(info)
