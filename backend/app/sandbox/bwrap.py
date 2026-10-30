@@ -82,8 +82,8 @@ class BwrapSandbox(SandboxRunner):
             argv.extend(["--tmpfs", "/app"])
 
         argv.extend([
-            "--bind", str(workspace), "/work",  # mount isolated workspace writable at /work
-            "--chdir", "/work",
+            "--bind", str(workspace), "/tmp/work",  # mount isolated workspace writable under /tmp tmpfs
+            "--chdir", "/tmp/work",
             "--unshare-all",                # user, mount, net, pid, ipc, uts isolation
             "--die-with-parent",
             "--new-session",
@@ -93,7 +93,7 @@ class BwrapSandbox(SandboxRunner):
             "--setenv", "LANG", "C.UTF-8",
             "--setenv", "PYTHONDONTWRITEBYTECODE", "1",
             "--setenv", "PYTHONHASHSEED", "0",
-            "--setenv", "PYTHONPATH", "/work:/work/src",
+            "--setenv", "PYTHONPATH", "/tmp/work:/tmp/work/src",
             "--",
             *cmd,
         ])
@@ -192,7 +192,7 @@ class BwrapSandbox(SandboxRunner):
     def describe(self) -> SandboxInfo:
         notes = [
             "bubblewrap namespace sandbox: mount, network, PID, UTS, IPC isolation.",
-            "Root filesystem read-only; /app hidden via tmpfs (when present); workspace at /work.",
+            "Root filesystem read-only; /app hidden via tmpfs (when present); workspace at /tmp/work.",
             "Environment completely cleared (--clearenv); no host variables visible.",
         ]
         if not self._self_tested:

@@ -30,8 +30,8 @@ def test_bwrap_argv_contains_isolation_flags() -> None:
     assert "--proc /proc" in joined
     assert "--dev /dev" in joined
     assert "--die-with-parent" in joined
-    assert f"--bind {ws} /work" in joined
-    assert "--chdir /work" in joined
+    assert f"--bind {ws} /tmp/work" in joined
+    assert "--chdir /tmp/work" in joined
     assert "NEBIUS" not in joined
     assert "GITHUB" not in joined
 
