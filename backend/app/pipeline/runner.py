@@ -35,12 +35,12 @@ from app.repair.patching import (
     snapshot_hash,
     touched_paths,
 )
+from app.runners import get_language_runner
+from app.runners.schema import TestRunResult as _TestRunResult
 from app.sandbox.base import SandboxRunner
 from app.security import SecurityScanResult, VulnerabilityFinding, run_security_scan
 from app.verification.contest import find_contests
 from app.verification.grounding import build_spec_corpus, check_grounding
-from app.runners import get_language_runner
-from app.runners.schema import TestRunResult as _TestRunResult
 from app.verification.pytest_runner import run_pytest_check
 from app.verification.results import (
     CheckOutcome,
@@ -199,7 +199,8 @@ def _trr_to_check(
     This bridges the language-agnostic runner output into the verification
     pipeline's evidence schema.
     """
-    from app.verification.results import CheckOutcome, CheckRole as _CR
+    from app.verification.results import CheckOutcome
+    from app.verification.results import CheckRole as _CR
     _role = role if role is not None else _CR.CORRECTNESS
     check = CheckResult(
         name=name,

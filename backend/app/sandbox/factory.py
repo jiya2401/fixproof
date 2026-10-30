@@ -1,4 +1,4 @@
-from app.config import get_settings
+﻿from app.config import get_settings
 from app.sandbox.base import SandboxRunner
 
 
@@ -13,7 +13,8 @@ def get_sandbox() -> SandboxRunner:
     - 'local':  Process sandbox with rlimits (used for Render deployment and local dev).
                 Requires FIXPROOF_ALLOW_UNSAFE_LOCAL_EXECUTION=true.
     - 'docker': Docker container sandbox (requires Docker CLI and running Docker daemon).
-    - 'bwrap':  bubblewrap Linux user-namespace sandbox (requires Linux host supporting user namespaces).
+    - 'bwrap':  bubblewrap Linux user-namespace sandbox
+                (requires Linux host supporting user namespaces).
 
     There is NO silent fallback between modes: untrusted code will never run without
     the configured security boundary.

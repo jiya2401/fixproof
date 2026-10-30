@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import os
 import shutil
 
@@ -106,7 +106,11 @@ class LocalSandbox(SandboxRunner):
             argv = ["unshare", "-rn", "--", *argv]
         started = time.monotonic()
         timed_out = False
-        logger.info("LocalSandbox.run: starting cmd='%s' timeout=%ds", cmd_str[:120], timeout_seconds)
+        logger.info(
+            "LocalSandbox.run: starting cmd='%s' timeout=%ds",
+            cmd_str[:120],
+            timeout_seconds,
+        )
         proc = subprocess.Popen(
             argv,
             cwd=workspace,
@@ -122,7 +126,11 @@ class LocalSandbox(SandboxRunner):
             stdout, stderr = proc.communicate(timeout=timeout_seconds)
         except subprocess.TimeoutExpired:
             timed_out = True
-            logger.warning("LocalSandbox.run: cmd timed out after %ds, killing pid %d", timeout_seconds, proc.pid)
+            logger.warning(
+                "LocalSandbox.run: cmd timed out after %ds, killing pid %d",
+                timeout_seconds,
+                proc.pid,
+            )
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
             except ProcessLookupError:
@@ -130,7 +138,12 @@ class LocalSandbox(SandboxRunner):
             stdout, stderr = proc.communicate()
         duration = time.monotonic() - started
         exit_code = -9 if timed_out else proc.returncode
-        logger.info("LocalSandbox.run: completed exit_code=%d timed_out=%s in %.2fs", exit_code, timed_out, duration)
+        logger.info(
+            "LocalSandbox.run: completed exit_code=%d timed_out=%s in %.2fs",
+            exit_code,
+            timed_out,
+            duration,
+        )
         return CommandResult(
             command=cmd_str,
             exit_code=exit_code,

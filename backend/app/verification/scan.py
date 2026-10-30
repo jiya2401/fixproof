@@ -252,15 +252,20 @@ def scan_project(sandbox: SandboxRunner, source: Path, timeout_seconds: int = 18
     if scan_status == "partial":
         scan.hint = (
             f"The test suite was interrupted after {timeout_seconds}s (PARTIAL SCAN). "
-            f"{len(failing)} failing test(s) were recovered before timeout; select one below to repair."
+            f"{len(failing)} failing test(s) were recovered before timeout; "
+            "select one below to repair."
         )
     elif scan_status == "timed_out":
         scan.hint = (
-            f"The test suite did not finish within {timeout_seconds}s (TIMED OUT) and no failing tests "
-            "could be determined before termination. Enter a specific test path below to run directly."
+            f"The test suite did not finish within {timeout_seconds}s (TIMED OUT) and "
+            "no failing tests could be determined before termination. "
+            "Enter a specific test path below to run directly."
         )
     elif scan_status == "error":
-        first = next((ln for ln in (combined or raw_output).splitlines() if ln.strip()), "no output")
+        first = next(
+            (ln for ln in (combined or raw_output).splitlines() if ln.strip()),
+            "no output",
+        )
         scan.hint = f"The sandbox could not start or encountered an error: {first[:200]}"
     elif missing or local:
         parts = []

@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -195,14 +195,28 @@ def delete_project(project_id: str) -> None:
 @router.post("/projects/{project_id}/scan", response_model=ScanResult)
 def scan(project_id: str) -> ScanResult:
     info, source = _project(project_id)
-    logger.info("routes.scan: requested for project %s (%s, %d files, %d tests)", project_id, info.name, info.files, info.test_files)
+    logger.info(
+        "routes.scan: requested for project %s (%s, %d files, %d tests)",
+        project_id,
+        info.name,
+        info.files,
+        info.test_files,
+    )
     try:
         sandbox = get_sandbox()
     except SandboxUnavailable as exc:
         logger.error("routes.scan: sandbox unavailable: %s", exc)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     res = scan_project(sandbox, source)
-    logger.info("routes.scan: completed for project %s (duration=%.2fs, tests=%d, failing=%d, timed_out=%s)", project_id, res.duration_seconds, res.tests, len(res.failing_tests), res.timed_out)
+    logger.info(
+        "routes.scan: completed for project %s (duration=%.2fs, tests=%d, "
+        "failing=%d, timed_out=%s)",
+        project_id,
+        res.duration_seconds,
+        res.tests,
+        len(res.failing_tests),
+        res.timed_out,
+    )
     return res
 
 

@@ -78,7 +78,12 @@ def parse_outcomes(path: Path) -> dict[str, str]:
     return outcomes
 
 
-def run_suite(sandbox: SandboxRunner, workspace: Path, timeout_seconds: int = 180, runner=None) -> SuiteRun:
+def run_suite(
+    sandbox: SandboxRunner,
+    workspace: Path,
+    timeout_seconds: int = 180,
+    runner=None,
+) -> SuiteRun:
     """Run the full test suite and return a :class:`SuiteRun` for regression comparison.
 
     When *runner* is ``None`` the language is detected from *workspace* automatically

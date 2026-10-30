@@ -1,5 +1,6 @@
-"""Tests for BwrapSandbox and its factory integration."""
+﻿"""Tests for BwrapSandbox and its factory integration."""
 
+import os
 import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -18,7 +19,8 @@ def test_bwrap_argv_contains_isolation_flags() -> None:
     sandbox._bwrap = "/usr/bin/bwrap"
     sandbox._self_tested = False
     ws = Path("/tmp/ws/repo")
-    with patch("os.path.exists", side_effect=lambda p: True if p == "/app" else os.path.exists(p)):
+    real_exists = os.path.exists
+    with patch("os.path.exists", side_effect=lambda p: True if p == "/app" else real_exists(p)):
         argv = sandbox.bwrap_argv(ws, ["python", "-m", "pytest"])
         joined = " ".join(argv)
 
@@ -121,7 +123,8 @@ def test_bwrap_network_is_blocked(tmp_path: Path) -> None:
             [
                 "python",
                 "-c",
-                "import socket,sys\ntry:\n socket.create_connection(('1.1.1.1',53),2)\n sys.exit(1)\nexcept OSError:\n sys.exit(0)",
+                ("import socket,sys\ntry:\n socket.create_connection(('1.1.1.1',53),2)"
+                 "\n sys.exit(1)\nexcept OSError:\n sys.exit(0)"),
             ],
         )
         assert result.passed, f"Network should be blocked: {result.stderr}"
@@ -141,7 +144,8 @@ def test_bwrap_env_is_cleared(tmp_path: Path, monkeypatch) -> None:
             [
                 "python",
                 "-c",
-                "import os,sys\nsys.exit(1 if 'NEBIUS_API_KEY' in os.environ or 'FIXPROOF_GITHUB_TOKEN' in os.environ else 0)",
+                ("import os,sys\nsys.exit(1 if 'NEBIUS_API_KEY' in os.environ or "
+                 "'FIXPROOF_GITHUB_TOKEN' in os.environ else 0)"),
             ],
         )
         assert result.passed, "Host secrets must be stripped from sandbox environment"

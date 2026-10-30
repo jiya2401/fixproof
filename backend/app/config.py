@@ -1,4 +1,4 @@
-from functools import lru_cache
+﻿from functools import lru_cache
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -14,7 +14,8 @@ class Settings(BaseSettings):
     environment: str = Field(default="development", alias="FIXPROOF_ENV")
     database_url: str = Field(default="sqlite:///./fixproof.db", alias="FIXPROOF_DATABASE_URL")
     max_repair_iterations: int = Field(default=3, alias="FIXPROOF_MAX_REPAIR_ITERATIONS")
-    # Sandbox modes: "local" (Render/dev with rlimits), "docker" (local daemon), "bwrap" (Linux namespaces)
+    # Sandbox modes: "local" (Render/dev with rlimits), "docker" (local daemon),
+    # "bwrap" (Linux namespaces)
     sandbox_mode: str = Field(default="local", alias="FIXPROOF_SANDBOX_MODE")
     sandbox_image: str = Field(default="fixproof-sandbox:latest", alias="FIXPROOF_SANDBOX_IMAGE")
     cors_origins: str = Field(default="http://localhost:5173", alias="FIXPROOF_CORS_ORIGINS")
