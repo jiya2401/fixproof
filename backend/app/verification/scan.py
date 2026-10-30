@@ -83,34 +83,82 @@ def scan_project(sandbox: SandboxRunner, source: Path, timeout_seconds: int = 18
 
     junit = ".fixproof_junit_scan.xml"
     try:
-        run_start = time.monotonic()
-        # Optimization: --maxfail=10 stops scanning after finding enough failing tests to repair,
-        # avoiding running hundreds of additional passing tests in huge suites.
-        result = sandbox.run(
+        # ── Phase 1: fast collection-only pre-pass (≤30 s) ─────────────────────
+        # Detects missing-module / import errors in a few seconds without burning the
+        # full timeout budget on a test run that cannot possibly succeed.
+        collect_budget = min(30, max(10, timeout_seconds // 4))
+        collect_start = time.monotonic()
+        collect_result = sandbox.run(
             workspace,
             [
-                "python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "--tb=short", "-rfE",
-                "--maxfail=10", "--continue-on-collection-errors", f"--junitxml={junit}",
+                "python", "-m", "pytest", "--collect-only", "-q",
+                "-p", "no:cacheprovider", "--continue-on-collection-errors",
             ],
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=collect_budget,
         )  # fmt: skip
-        run_duration = time.monotonic() - run_start
+        collect_duration = time.monotonic() - collect_start
         logger.info(
-            "scan_project: pytest execution finished in %.2fs (exit_code=%s, timed_out=%s)",
-            run_duration,
-            result.exit_code,
-            result.timed_out,
+            "scan_project: collection pre-pass finished in %.2fs (exit_code=%s, timed_out=%s)",
+            collect_duration,
+            collect_result.exit_code,
+            collect_result.timed_out,
         )
 
-        parse_start = time.monotonic()
-        stats = _junit_summary(workspace / junit)
-        logger.info(
-            "scan_project: parsed junit summary (tests=%s, failures=%s, errors=%s) in %.3fs",
-            stats.get("tests", 0),
-            stats.get("failures", 0),
-            stats.get("errors", 0),
-            time.monotonic() - parse_start,
+        collect_combined = collect_result.stdout + "\n" + collect_result.stderr
+        collect_missing = _MISSING_MODULE.findall(collect_combined)
+        # Did pytest collect at least one test item?
+        _has_collected = bool(re.search(r"\d+ test", collect_result.stdout))
+        # Whole-suite collection failure: exit 2, nothing collected, missing modules known, no timeout.
+        _all_collection_failures = (
+            collect_result.exit_code == 2
+            and not _has_collected
+            and collect_missing
+            and not collect_result.timed_out
         )
+
+        stats: dict
+        if _all_collection_failures:
+            # Skip the full run — it would hit the same wall after burning 180 s.
+            logger.warning(
+                "scan_project: entire suite failed to collect (%d missing modules). "
+                "Skipping full test run.",
+                len(set(collect_missing)),
+            )
+            result = collect_result
+            stats = {"tests": 0, "failures": 0, "errors": len(set(collect_missing)), "skipped": 0}
+        else:
+            # ── Phase 2: full test run with whatever budget remains ─────────────
+            elapsed_so_far = time.monotonic() - total_start
+            remaining_budget = max(10, timeout_seconds - int(elapsed_so_far) - 5)
+
+            run_start = time.monotonic()
+            # --maxfail=10 stops scanning after finding enough failing tests to repair,
+            # avoiding running hundreds of additional passing tests in huge suites.
+            result = sandbox.run(
+                workspace,
+                [
+                    "python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "--tb=short", "-rfE",
+                    "--maxfail=10", "--continue-on-collection-errors", f"--junitxml={junit}",
+                ],
+                timeout_seconds=remaining_budget,
+            )  # fmt: skip
+            run_duration = time.monotonic() - run_start
+            logger.info(
+                "scan_project: pytest execution finished in %.2fs (exit_code=%s, timed_out=%s)",
+                run_duration,
+                result.exit_code,
+                result.timed_out,
+            )
+
+            parse_start = time.monotonic()
+            stats = _junit_summary(workspace / junit)
+            logger.info(
+                "scan_project: parsed junit summary (tests=%s, failures=%s, errors=%s) in %.3fs",
+                stats.get("tests", 0),
+                stats.get("failures", 0),
+                stats.get("errors", 0),
+                time.monotonic() - parse_start,
+            )
     finally:
         cleanup_start = time.monotonic()
         sandbox.destroy(workspace)
