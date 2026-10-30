@@ -1,13 +1,17 @@
 """Scan a user project for failing tests so the user can pick what to repair, and validate
 user-supplied reproduction targets before they are passed to pytest."""
 
+import logging
 import re
+import time
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
 from app.sandbox.base import SandboxRunner
 from app.verification.pytest_runner import _junit_summary
+
+logger = logging.getLogger("fixproof.scan")
 
 _RESULT_LINE = re.compile(r"^(FAILED|ERROR) (\S+)(?: - (.*))?$", re.MULTILINE)
 _MISSING_MODULE = re.compile(r"No module named '([\w.]+)'")
@@ -22,6 +26,7 @@ class FailingTest(BaseModel):
 class ScanResult(BaseModel):
     exit_code: int | None = None
     timed_out: bool = False
+    status: str = "completed"  # "completed" | "timed_out" | "partial" | "error"
     duration_seconds: float = 0.0
     tests: int = 0
     failed: int = 0
@@ -68,42 +73,129 @@ def _is_project_module(source: Path, name: str) -> bool:
 
 
 def scan_project(sandbox: SandboxRunner, source: Path, timeout_seconds: int = 180) -> ScanResult:
+    total_start = time.monotonic()
+    logger.info("scan_project: starting scan for source=%s (timeout=%ds)", source, timeout_seconds)
+
+    prep_start = time.monotonic()
     workspace = sandbox.prepare_workspace(source)
+    prep_duration = time.monotonic() - prep_start
+    logger.info("scan_project: workspace prepared at %s (took %.2fs)", workspace, prep_duration)
+
+    junit = ".fixproof_junit_scan.xml"
     try:
-        junit = ".fixproof_junit_scan.xml"
+        run_start = time.monotonic()
+        # Optimization: --maxfail=10 stops scanning after finding enough failing tests to repair,
+        # avoiding running hundreds of additional passing tests in huge suites.
         result = sandbox.run(
             workspace,
             [
                 "python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "--tb=short", "-rfE",
-                "--continue-on-collection-errors", f"--junitxml={junit}",
+                "--maxfail=10", "--continue-on-collection-errors", f"--junitxml={junit}",
             ],
             timeout_seconds=timeout_seconds,
         )  # fmt: skip
+        run_duration = time.monotonic() - run_start
+        logger.info(
+            "scan_project: pytest execution finished in %.2fs (exit_code=%s, timed_out=%s)",
+            run_duration,
+            result.exit_code,
+            result.timed_out,
+        )
+
+        parse_start = time.monotonic()
         stats = _junit_summary(workspace / junit)
+        logger.info(
+            "scan_project: parsed junit summary (tests=%s, failures=%s, errors=%s) in %.3fs",
+            stats.get("tests", 0),
+            stats.get("failures", 0),
+            stats.get("errors", 0),
+            time.monotonic() - parse_start,
+        )
     finally:
+        cleanup_start = time.monotonic()
         sandbox.destroy(workspace)
+        logger.info("scan_project: workspace destroyed in %.3fs", time.monotonic() - cleanup_start)
 
     combined = result.stdout + "\n" + result.stderr
-    failing, collection = [], []
+    failing: list[FailingTest] = []
+    collection: list[FailingTest] = []
+    seen_failing: set[str] = set()
+    seen_collection: set[str] = set()
+
+    # 1. Parse failures and collection errors from stdout
     for kind, node, message in _RESULT_LINE.findall(result.stdout):
-        item = FailingTest(node_id=node.replace("\\", "/"), message=message[:300])
-        # FAILED = a test ran and failed; ERROR = collection/import/fixture problem
-        (failing if kind == "FAILED" else collection).append(item)
+        clean_node = node.replace("\\", "/")
+        item = FailingTest(node_id=clean_node, message=message[:300])
+        if kind == "FAILED":
+            if clean_node not in seen_failing:
+                seen_failing.add(clean_node)
+                failing.append(item)
+        else:
+            if clean_node not in seen_collection:
+                seen_collection.add(clean_node)
+                collection.append(item)
+
+    # 2. Merge JUnit XML failures without duplicating
+    for bad_str in stats.get("failing", []):
+        parts = str(bad_str).split(": ", 1)
+        name = parts[0].replace("\\", "/")
+        msg = parts[1] if len(parts) > 1 else ""
+        if name not in seen_failing:
+            seen_failing.add(name)
+            failing.append(FailingTest(node_id=name, message=msg[:300]))
+
+    for err_str in stats.get("erroring", []):
+        parts = str(err_str).split(": ", 1)
+        name = parts[0].replace("\\", "/")
+        msg = parts[1] if len(parts) > 1 else ""
+        if name not in seen_collection:
+            seen_collection.add(name)
+            collection.append(FailingTest(node_id=name, message=msg[:300]))
+
     wanted = sorted({m.split(".")[0] for m in _MISSING_MODULE.findall(combined)})
     local = [m for m in wanted if _is_project_module(source, m)]
     missing = [m for m in wanted if m not in local]
+
+    # Explicit scan status: PARTIAL, TIMED_OUT, ERROR, or COMPLETED
+    if result.timed_out:
+        scan_status = "partial" if failing else "timed_out"
+    elif result.exit_code in (125, 126, 127):
+        scan_status = "error"
+    else:
+        scan_status = "completed"
+
+    junit_tests = int(stats["tests"])
+    effective_tests = max(junit_tests, len(failing) + len(collection))
+    effective_failed = max(int(stats["failures"]), len(failing))
+    effective_errors = max(int(stats["errors"]), len(collection))
+
     scan = ScanResult(
-        exit_code=result.exit_code, timed_out=result.timed_out,
-        duration_seconds=round(result.duration_seconds, 2), tests=int(stats["tests"]),
-        failed=int(stats["failures"]), errors=int(stats["errors"]), skipped=int(stats["skipped"]),
-        failing_tests=failing, collection_errors=collection, missing_modules=missing,
+        exit_code=result.exit_code,
+        timed_out=result.timed_out,
+        status=scan_status,
+        duration_seconds=round(time.monotonic() - total_start, 2),
+        tests=effective_tests,
+        failed=effective_failed,
+        errors=effective_errors,
+        skipped=int(stats["skipped"]),
+        failing_tests=failing,
+        collection_errors=collection,
+        missing_modules=missing,
         local_modules_unresolved=local,
         output_excerpt=combined.strip()[-3000:],
     )  # fmt: skip
 
-    if result.timed_out:
-        scan.hint = f"The test suite did not finish within {timeout_seconds}s inside the sandbox."
-    elif result.exit_code in (125, 126, 127) and not scan.tests:
+    if scan_status == "partial":
+        scan.hint = (
+            f"The test suite was interrupted after {timeout_seconds}s (PARTIAL SCAN). "
+            f"{len(failing)} failing test(s) were recovered before timeout; select one below to repair."
+        )
+    elif scan_status == "timed_out":
+        scan.hint = (
+            f"The test suite did not finish within {timeout_seconds}s (TIMED OUT) and no failing tests "
+            "could be determined before termination. Enter a specific test path below (e.g. tests/test_x.py::test_y) to run directly."
+        )
+    elif scan_status == "error":
         first = next((ln for ln in result.stderr.splitlines() if ln.strip()), "no stderr")
         scan.hint = f"The sandbox could not start (exit {result.exit_code}): {first[:200]}"
     elif missing or local:
@@ -121,10 +213,19 @@ def scan_project(sandbox: SandboxRunner, source: Path, timeout_seconds: int = 18
                 "pick a test that runs on its own, or use that sub-folder as the project."
             )
         scan.hint = " ".join(parts)
-    elif result.exit_code == 5:
+    elif result.exit_code == 5 or effective_tests == 0:
         scan.hint = "pytest collected no tests. FixProof needs a pytest test that fails."
     elif result.exit_code == 0:
         scan.hint = "All tests pass, so there is no failing test to reproduce."
     elif not failing and collection:
         scan.hint = "Tests could not be collected (import or syntax errors). See the output below."
+
+    logger.info(
+        "scan_project: scan completed status=%s total_duration=%.2fs (tests=%d, failing=%d, collection=%d)",
+        scan.status,
+        scan.duration_seconds,
+        scan.tests,
+        len(scan.failing_tests),
+        len(scan.collection_errors),
+    )
     return scan

@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 
@@ -17,6 +18,8 @@ from app.config import get_settings
 from app.sandbox.base import CommandResult, SandboxRunner
 from app.sandbox.common import _IGNORE, MAX_OUTPUT_CHARS
 from app.verification.results import SandboxInfo
+
+logger = logging.getLogger("fixproof.sandbox.local")
 
 
 class UnsafeLocalExecutionDisabled(RuntimeError):
@@ -97,11 +100,13 @@ class LocalSandbox(SandboxRunner):
         }
 
     def run(self, workspace: Path, command: list[str], timeout_seconds: int = 120) -> CommandResult:
+        cmd_str = " ".join(command)
         argv = [sys.executable if command[0] == "python" else command[0], *command[1:]]
         if self._net_blocked:
             argv = ["unshare", "-rn", "--", *argv]
         started = time.monotonic()
         timed_out = False
+        logger.info("LocalSandbox.run: starting cmd='%s' timeout=%ds", cmd_str[:120], timeout_seconds)
         proc = subprocess.Popen(
             argv,
             cwd=workspace,
@@ -117,17 +122,21 @@ class LocalSandbox(SandboxRunner):
             stdout, stderr = proc.communicate(timeout=timeout_seconds)
         except subprocess.TimeoutExpired:
             timed_out = True
+            logger.warning("LocalSandbox.run: cmd timed out after %ds, killing pid %d", timeout_seconds, proc.pid)
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
             stdout, stderr = proc.communicate()
+        duration = time.monotonic() - started
+        exit_code = -9 if timed_out else proc.returncode
+        logger.info("LocalSandbox.run: completed exit_code=%d timed_out=%s in %.2fs", exit_code, timed_out, duration)
         return CommandResult(
-            command=" ".join(command),
-            exit_code=-9 if timed_out else proc.returncode,
+            command=cmd_str,
+            exit_code=exit_code,
             stdout=(stdout or "")[:MAX_OUTPUT_CHARS],
             stderr=(stderr or "")[:MAX_OUTPUT_CHARS],
-            duration_seconds=time.monotonic() - started,
+            duration_seconds=duration,
             timed_out=timed_out,
         )
 

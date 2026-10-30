@@ -1,4 +1,4 @@
-﻿"""Intake of user projects: zip upload, GitHub URL, or an allow-listed local folder.
+"""Intake of user projects: zip upload, GitHub URL, or an allow-listed local folder.
 
 Everything here treats the project as hostile data: archives are extracted with path/size/symlink
 checks, git is run without hooks/submodules/credentials, local paths must live under an
@@ -7,12 +7,14 @@ operator-approved root. Project code itself only ever executes inside the sandbo
 
 import io
 import json
+import logging
 import os
 import re
 import shutil
 import stat
 import subprocess
 import tempfile
+import time
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -21,6 +23,8 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from app.config import get_settings
+
+logger = logging.getLogger("fixproof.projects")
 
 IGNORED_DIRS = {
     ".git", "__pycache__", ".pytest_cache", ".venv", "venv", "node_modules", ".idea", ".vscode",
@@ -118,6 +122,8 @@ def _git_env(home: Path, protocol: str) -> dict[str, str]:
 
 def git_clone(url: str, dest: Path, ref: str | None = None, protocol: str = "https") -> None:
     """Shallow clone with no hooks, submodules, credentials or prompts. Caller validates `url`."""
+    start_time = time.monotonic()
+    logger.info("git_clone: starting shallow clone url=%s ref=%s", url, ref)
     command = [
         "git", "-c", "protocol.allow=never", "-c", f"protocol.{protocol}.allow=always",
         "-c", "core.symlinks=false", "-c", "core.hooksPath=" + os.devnull,
@@ -133,12 +139,16 @@ def git_clone(url: str, dest: Path, ref: str | None = None, protocol: str = "htt
             timeout=120, check=False,
         )  # fmt: skip
     except subprocess.TimeoutExpired as exc:
+        logger.error("git_clone: timed out after 120s for url=%s", url)
         raise ProjectError("git clone timed out after 120s") from exc
     finally:
         shutil.rmtree(home, ignore_errors=True)
     if done.returncode != 0:
-        raise ProjectError("git clone failed: " + (done.stderr.strip().splitlines() or ["?"])[-1])
+        err_msg = (done.stderr.strip().splitlines() or ["?"])[-1]
+        logger.error("git_clone: failed with returncode=%d stderr=%s", done.returncode, err_msg)
+        raise ProjectError("git clone failed: " + err_msg)
     _rmtree(dest / ".git")
+    logger.info("git_clone: succeeded in %.2fs", time.monotonic() - start_time)
 
 
 def _sanitize_tree(root: Path) -> tuple[int, int]:
@@ -205,6 +215,14 @@ class ProjectStore:
             _rmtree(self._slot(info))
             raise
         (self._slot(info) / "info.json").write_text(info.model_dump_json())
+        logger.info(
+            "ProjectStore._finish: project %s finalized (files=%d, python=%d, test=%d, lang=%s)",
+            info.id,
+            info.files,
+            info.python_files,
+            info.test_files,
+            info.language,
+        )
         return info
 
     def create_from_zip(self, data: bytes, filename: str = "project.zip") -> ProjectInfo:

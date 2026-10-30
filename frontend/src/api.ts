@@ -165,6 +165,7 @@ export type FailingTest = { node_id: string; message: string }
 export type ScanResult = {
   exit_code: number | null
   timed_out: boolean
+  status?: 'completed' | 'timed_out' | 'partial' | 'error'
   duration_seconds: number
   tests: number
   failed: number

@@ -61,7 +61,7 @@ export default function ScanStep({
 
       {isProject && (
         <Card className="p-6">
-          <SectionTitle hint={scan ? `${scan.duration_seconds}s in the sandbox` : undefined}>
+          <SectionTitle hint={scan ? (scan.status === 'timed_out' ? `Timed out (${scan.duration_seconds}s)` : scan.status === 'partial' ? `Partial (${scan.duration_seconds}s)` : `${scan.duration_seconds}s in the sandbox`) : undefined}>
             1 · Find the failing test
           </SectionTitle>
           {!scan && !error && (
