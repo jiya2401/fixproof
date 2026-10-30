@@ -146,11 +146,9 @@ def about() -> dict[str, Any]:
 async def upload_project(request: Request) -> ProjectInfo:
     """Raw zip bytes in the body (Content-Type: application/zip), name in X-Filename."""
     limit = get_settings().max_project_mb * 1024 * 1024 + MAX_UPLOAD_BYTES_SLACK
-    data = bytearray()
-    async for chunk in request.stream():
-        data.extend(chunk)
-        if len(data) > limit:
-            raise HTTPException(status_code=413, detail="archive is too large")
+    data = await request.body()
+    if len(data) > limit:
+        raise HTTPException(status_code=413, detail="archive is too large")
     filename = request.headers.get("x-filename", "project.zip")
     try:
         return await run_in_threadpool(_store().create_from_zip, bytes(data), filename)
@@ -192,30 +190,45 @@ def delete_project(project_id: str) -> None:
     _store().delete(project_id)
 
 
+class ScanRequest(BaseModel):
+    test_id: str | None = None
+
+
 @router.post("/projects/{project_id}/scan", response_model=ScanResult)
-def scan(project_id: str) -> ScanResult:
+def scan(project_id: str, payload: ScanRequest | None = None) -> ScanResult:
     info, source = _project(project_id)
+    test_id = (
+        payload.test_id.strip()
+        if (payload and payload.test_id and payload.test_id.strip())
+        else None
+    )
     logger.info(
-        "routes.scan: requested for project %s (%s, %d files, %d tests)",
+        "routes.scan: requested for project %s (%s, %d files, %d tests, test_id=%s)",
         project_id,
         info.name,
         info.files,
         info.test_files,
+        test_id,
     )
     try:
         sandbox = get_sandbox()
     except SandboxUnavailable as exc:
         logger.error("routes.scan: sandbox unavailable: %s", exc)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    res = scan_project(sandbox, source)
+    try:
+        res = scan_project(sandbox, source, test_id=test_id)
+    except TargetError as exc:
+        logger.warning("routes.scan: invalid test_id=%s: %s", test_id, exc)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     logger.info(
         "routes.scan: completed for project %s (duration=%.2fs, tests=%d, "
-        "failing=%d, timed_out=%s)",
+        "failing=%d, timed_out=%s, status=%s)",
         project_id,
         res.duration_seconds,
         res.tests,
         len(res.failing_tests),
         res.timed_out,
+        res.status,
     )
     return res
 

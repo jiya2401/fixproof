@@ -163,9 +163,10 @@ export type SyncEvent = {
 export type FailingTest = { node_id: string; message: string }
 
 export type ScanResult = {
+  target?: string | null
   exit_code: number | null
   timed_out: boolean
-  status?: 'completed' | 'timed_out' | 'partial' | 'error'
+  status?: 'completed' | 'timed_out' | 'partial' | 'failed' | 'inconclusive' | 'error'
   duration_seconds: number
   tests: number
   failed: number
@@ -174,6 +175,7 @@ export type ScanResult = {
   failing_tests: FailingTest[]
   collection_errors: FailingTest[]
   missing_modules: string[]
+  local_modules_unresolved?: string[]
   hint: string
   output_excerpt: string
 }
@@ -283,8 +285,11 @@ export const projectFromGit = (url: string, ref?: string) =>
   call<ProjectInfo>('/api/v1/projects/git', json({ url, ref: ref || null }))
 export const projectFromLocal = (path: string) =>
   call<ProjectInfo>('/api/v1/projects/local', json({ path }))
-export const scanProject = (id: string) =>
-  call<ScanResult>(`/api/v1/projects/${id}/scan`, { method: 'POST' })
+export const scanProject = (id: string, testId?: string) =>
+  call<ScanResult>(
+    `/api/v1/projects/${id}/scan`,
+    testId ? json({ test_id: testId }) : { method: 'POST' },
+  )
 
 export async function startInvestigation(args: {
   issue: string

@@ -23,6 +23,7 @@ export default function ProjectSource({
   const [drag, setDrag] = useState(false)
   const [gitUrl, setGitUrl] = useState('')
   const [gitRef, setGitRef] = useState('')
+  const [testId, setTestId] = useState('')
   const [localPath, setLocalPath] = useState('')
   const fileInput = useRef<HTMLInputElement>(null)
 
@@ -89,7 +90,11 @@ export default function ProjectSource({
       {tab === 'git' && (
         <form className="space-y-4" onSubmit={(e) => {
           e.preventDefault()
-          guarded(async () => ({ kind: 'project', info: await projectFromGit(gitUrl.trim(), gitRef.trim()) }))
+          guarded(async () => ({
+            kind: 'project',
+            info: await projectFromGit(gitUrl.trim(), gitRef.trim()),
+            initialTestId: testId.trim() || undefined,
+          }))
         }}>
           <label className="block text-sm text-zinc-300">
             Repository URL
@@ -101,6 +106,15 @@ export default function ProjectSource({
             Branch or tag <span className="text-zinc-500">(optional)</span>
             <input value={gitRef} onChange={(e) => setGitRef(e.target.value)} placeholder="main"
               className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3.5 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:border-[var(--accent)] focus:outline-none" />
+          </label>
+          <label className="block text-sm text-zinc-300">
+            Failing test path or ID <span className="text-zinc-500">(optional)</span>
+            <input value={testId} onChange={(e) => setTestId(e.target.value)}
+              placeholder="tests/test_orders.py::test_discount_calc"
+              className="mono mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3.5 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:border-[var(--accent)] focus:outline-none" />
+            <span className="mt-1 block text-xs text-zinc-500">
+              Fast path: runs this specific test directly and skips global discovery. Leave empty to automatically discover tests.
+            </span>
           </label>
           <Button type="submit" disabled={busy || !gitUrl.trim()}>
             {busy ? <><Spinner /> Cloning…</> : 'Fetch repository'}
@@ -117,7 +131,11 @@ export default function ProjectSource({
         about?.project_sources.local ? (
           <form className="space-y-4" onSubmit={(e) => {
             e.preventDefault()
-            guarded(async () => ({ kind: 'project', info: await projectFromLocal(localPath.trim()) }))
+            guarded(async () => ({
+              kind: 'project',
+              info: await projectFromLocal(localPath.trim()),
+              initialTestId: testId.trim() || undefined,
+            }))
           }}>
             <label className="block text-sm text-zinc-300">
               Folder on the machine running the FixProof backend

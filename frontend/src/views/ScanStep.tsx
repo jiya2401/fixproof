@@ -11,17 +11,19 @@ export default function ScanStep({
   onRun: (issue: string, targets: string[]) => void
 }) {
   const isProject = source.kind === 'project'
+  const initialTestId = isProject ? source.initialTestId : undefined
   const [scan, setScan] = useState<ScanResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<string[]>([])
-  const [manual, setManual] = useState('')
+  const [manual, setManual] = useState(initialTestId ?? '')
   const [issue, setIssue] = useState(source.kind === 'example' ? source.issue : '')
   const [touched, setTouched] = useState(false)
+  const [scanningTarget, setScanningTarget] = useState(false)
 
   useEffect(() => {
     if (source.kind !== 'project') return
     let cancelled = false
-    scanProject(source.info.id)
+    scanProject(source.info.id, initialTestId)
       .then((result) => {
         if (cancelled) return
         setScan(result)
@@ -33,7 +35,26 @@ export default function ScanStep({
       })
       .catch((e) => !cancelled && setError(e instanceof Error ? e.message : String(e)))
     return () => { cancelled = true }
-  }, [source])
+  }, [source, initialTestId])
+
+  async function handleTargetedScan(targetNode: string) {
+    if (!targetNode.trim() || source.kind !== 'project') return
+    setScanningTarget(true)
+    setError(null)
+    try {
+      const res = await scanProject(source.info.id, targetNode.trim())
+      setScan(res)
+      const first = res.failing_tests[0]
+      if (first) {
+        setSelected([first.node_id])
+        setIssue((cur) => cur || `${first.node_id} fails: ${first.message}`.slice(0, 400))
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setScanningTarget(false)
+    }
+  }
 
   const targets = [...selected, ...(manual.trim() ? [manual.trim()] : [])]
   const ready = issue.trim().length >= 10 && (!isProject || targets.length > 0)
@@ -61,7 +82,14 @@ export default function ScanStep({
 
       {isProject && (
         <Card className="p-6">
-          <SectionTitle hint={scan ? (scan.status === 'timed_out' ? `Timed out (${scan.duration_seconds}s)` : scan.status === 'partial' ? `Partial (${scan.duration_seconds}s)` : `${scan.duration_seconds}s in the sandbox`) : undefined}>
+          <SectionTitle hint={scan ? (
+            scan.status === 'timed_out' ? `Timed out (${scan.duration_seconds}s)` :
+            scan.status === 'partial' ? `Partial (${scan.duration_seconds}s)` :
+            scan.status === 'failed' ? `Failed (${scan.duration_seconds}s)` :
+            scan.status === 'inconclusive' ? `Inconclusive (${scan.duration_seconds}s)` :
+            scan.status === 'error' ? `Sandbox error (${scan.duration_seconds}s)` :
+            `${scan.duration_seconds}s in the sandbox`
+          ) : undefined}>
             1 · Find the failing test
           </SectionTitle>
           {!scan && !error && (
@@ -72,6 +100,12 @@ export default function ScanStep({
           {error && <ErrorBanner message={error} />}
           {scan && (
             <div className="space-y-4">
+              {scan.target && (
+                <div className="flex items-center gap-2">
+                  <Pill tone="blue">Targeted test</Pill>
+                  <span className="mono text-xs text-zinc-300">{scan.target}</span>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <Stat label="Tests" value={scan.tests} />
                 <Stat label="Failing" value={scan.failed} />
@@ -108,12 +142,30 @@ export default function ScanStep({
                   </ul>
                 </details>
               )}
-              <label className="block text-sm text-zinc-300">
-                Or enter a test id yourself
-                <input value={manual} onChange={(e) => setManual(e.target.value)}
-                  placeholder="tests/test_orders.py::test_total_with_discount"
-                  className="mono mt-1.5 w-full rounded-xl border border-white/10 bg-black/30 px-3.5 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:border-[var(--accent)] focus:outline-none" />
-              </label>
+              <div>
+                <label className="block text-sm text-zinc-300">
+                  Or enter a test id yourself
+                  <div className="mt-1.5 flex gap-2">
+                    <input
+                      value={manual}
+                      onChange={(e) => setManual(e.target.value)}
+                      placeholder="tests/test_orders.py::test_total_with_discount"
+                      className="mono w-full rounded-xl border border-white/10 bg-black/30 px-3.5 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:border-[var(--accent)] focus:outline-none"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      disabled={scanningTarget || !manual.trim()}
+                      onClick={() => handleTargetedScan(manual.trim())}
+                    >
+                      {scanningTarget ? <><Spinner /> Scanning…</> : 'Run targeted'}
+                    </Button>
+                  </div>
+                </label>
+                <p className="mt-1 text-xs text-zinc-500">
+                  Targeted execution runs only this test directly in the sandbox without global discovery.
+                </p>
+              </div>
             </div>
           )}
         </Card>
